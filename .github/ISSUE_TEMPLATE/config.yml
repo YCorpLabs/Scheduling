@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/YCorpLabs/Scheduling/security/advisories/new
+    about: Report it privately.
+  - name: Questions and feedback
+    url: https://github.com/YCorpLabs/Scheduling/discussions
+    about: Ask about self-hosting or share feedback.
+  - name: Hosted service support
+    url: mailto:support@ycorplabs.com
+    about: Help with meet.ycorplabs.com.

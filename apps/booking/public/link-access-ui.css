@@ -1,0 +1,29 @@
+/* Host: Link access disclosure in Booking rules (matches Booking limits) */
+.link-access{margin:18px 0 0;min-width:0}
+.link-access>summary{display:flex;align-items:center;gap:10px;min-height:44px;padding:10px 0;font-size:14px;font-weight:550;list-style:none;cursor:pointer}
+.link-access>summary::-webkit-details-marker{display:none}
+.link-access>summary::before{content:"";width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin:0 3px}
+.link-access[open]>summary::before{transform:rotate(45deg)}
+.link-access>summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:6px}
+.link-access>summary small{margin-left:auto;color:var(--muted);font-size:12px;font-weight:400;text-align:right;overflow-wrap:anywhere}
+.link-access-body{display:grid;gap:12px;padding-top:6px}
+.link-access-once{font-size:13px}
+.link-access-expiry{display:grid;gap:6px;min-width:0}
+.link-access-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.link-access-row select{flex:0 0 auto;min-width:132px}
+.link-access-when{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1 1 220px;min-width:0}
+.link-access-when[hidden]{display:none}
+.link-access-when input{flex:1 1 200px;min-width:0;font-variant-numeric:tabular-nums}
+.link-access-zone{font-size:12px;color:var(--muted);white-space:nowrap}
+.link-access-note{margin:0;font-size:12px;line-height:1.5;color:var(--muted)}.link-access-note:empty{display:none}
+.link-access-error{margin:0;font-size:12px;color:#b13e39}.link-access-error:empty{display:none}
+
+/* Owner list/editor: published but closed (expired or used) */
+.booking-link-state.closed i{background:#c08a3e}
+.publish-toggle [data-publish-label].closed{color:var(--muted)}
+
+/* Guest: closed link */
+.link-closed h1:focus{outline:none}
+.link-closed .link-closed-check{margin-top:8px}
+
+@media(max-width:520px){.link-access-row select{flex:1 1 100%}.link-access-when{flex-basis:100%}}

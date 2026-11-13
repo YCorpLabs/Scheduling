@@ -1,0 +1,30 @@
+/* Host: default length + optional guest choices */
+.duration-input{display:flex;align-items:center;gap:8px}.duration-input input{width:100%;min-width:0;font-variant-numeric:tabular-nums}.duration-input span{font-size:12px;color:var(--muted)}
+.duration-options{border:0;padding:0;margin:14px 0 0;min-width:0}.duration-options legend{font-size:12px;font-weight:500;padding:0;margin-bottom:8px}
+.duration-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.duration-chips{display:flex;flex-wrap:wrap;gap:6px}
+.duration-chip{position:relative;display:inline-flex;margin:0;font-size:12px;font-weight:450;cursor:pointer}
+.duration-chip input{position:absolute;opacity:0;inset:0;margin:0;cursor:inherit}
+.duration-chip>span:first-of-type{display:inline-flex;align-items:center;min-height:30px;padding:5px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font-variant-numeric:tabular-nums}
+.duration-chip input:checked+span{border-color:var(--ink);color:var(--ink);background:var(--tint,var(--soft))}
+.duration-chip.is-default{cursor:default}.duration-chip.is-default input:checked+span{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.duration-chip input:disabled:not(:checked)+span{opacity:.45;cursor:not-allowed}
+.duration-chip input:focus-visible+span{outline:2px solid var(--accent,currentColor);outline-offset:2px}
+.duration-custom{display:inline-flex;gap:6px;align-items:center}.duration-custom input{width:76px;min-height:30px;padding:4px 8px;font-size:12px}
+.duration-error{margin:6px 0 0;min-height:0;font-size:12px;color:var(--muted)}.duration-error:empty{display:none}
+#edit-duration[aria-invalid=true]{border-color:#b3261e}
+
+/* Guest: length chooser in the intro, only when more than one length is offered */
+.guest-durations{display:inline-flex;flex-wrap:wrap;gap:4px;border:0;margin:0;padding:3px;min-width:0;border-radius:9px;background:var(--soft,transparent);box-shadow:inset 0 0 0 1px var(--line)}
+.guest-duration{position:relative;display:inline-flex;margin:0;cursor:pointer}
+.guest-duration input{position:absolute;opacity:0;inset:0;margin:0;cursor:inherit}
+.guest-duration span{display:inline-flex;align-items:center;min-height:30px;padding:4px 10px;border-radius:6px;font-size:13px;line-height:18px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.guest-duration input:checked+span{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px #0002,0 0 0 1px var(--line)}
+.guest-duration input:focus-visible+span{outline:2px solid var(--accent,currentColor);outline-offset:1px}
+.guest-durations[aria-busy=true]{cursor:progress}
+.meeting-meta .guest-durations-item{display:flex;gap:10px;align-items:center;flex-basis:100%}
+.booking.is-loading .date-grid,.booking.is-loading .time-list{opacity:.4}
+.time-loading{font-size:13px;color:var(--muted);margin:12px 0}
+@media(prefers-reduced-motion:no-preference){[data-motion=smooth] .guest-duration span{transition:background .12s,color .12s,box-shadow .12s}[data-motion=smooth] .booking.is-loading .date-grid,[data-motion=smooth] .booking.is-loading .time-list{transition:opacity .12s}}
+@media(max-width:520px){.guest-durations{display:flex;width:100%}.guest-duration{flex:1 1 0}.guest-duration span{justify-content:center;width:100%;padding:4px 6px}.duration-custom{width:100%}.duration-custom input{flex:1}}
+@media(forced-colors:active){.duration-chip input:checked+span,.guest-duration input:checked+span{outline:2px solid Highlight}}

@@ -1,0 +1,58 @@
+{
+  "name": "@email/booking",
+  "private": true,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YCorpLabs/Scheduling.git",
+    "directory": "apps/booking"
+  },
+  "homepage": "https://github.com/YCorpLabs/Scheduling#readme",
+  "bugs": {
+    "url": "https://github.com/YCorpLabs/Scheduling/issues"
+  },
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8788 --infer-origin-from-routes=false",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
+    "check": "node --check src/account-data-operator.js && node --check scripts/account-inventory.mjs && node --check src/account-dependencies.js && node --check src/account-deletion.js && node --check src/account-cleanup.js && node --check public/account-deletion-ui.js && node --check public/brand.js && node --check scripts/instance-config.mjs && node --check src/lifecycle.js && node --check src/host-lifecycle.js && node --check public/account-data-ui.js && node --check src/export.js && node --check src/export-ledger.js && node --check public/link-access.js && node --check public/link-access-ui.js && node --check public/change-policy.js && node --check public/change-policy-ui.js && node --check public/durations.js && node --check public/durations-ui.js && node --check public/preview-policy.js && node --check public/my-calendar-ui.js && node --check public/calendar-access-ui.js && node --check public/share-ui.js && node --check public/account-menu.js && node --check public/calendar-connections-ui.js && node --check public/weekly-grid.js && node --check public/availability-ui.js && node --check public/team-ui.js && node --check public/team-guest.js && node --check public/team-policy.js && node --check public/meeting-defaults.js && node --check public/host-booking-ui.js && node --check public/workspace-ui.js && node --check public/integrations-ui.js && node --check src/identity.js && node --check src/workspaces.js && node --check src/integrations.js && node --check public/analytics-ui.js && node --check public/branding.js && node --check public/profile-ui.js && node --check public/calendar-destination-ui.js && node --check public/delivery-ui.js && node --check public/operations-ui.js && node --check public/followup.js && node --check public/followup-ui.js && node --check public/approval-ui.js && node --check public/intake.js && node --check public/intake-ui.js && node --check public/reminder-ui.js && node --check public/schedule-ui.js && node --check public/app.js && node --check public/host-ui.js && node --check public/host-editor.js && node --check public/manage-ui.js && node --check public/conference-ui.js && node --check public/session-ui.js && node --check public/embed.js && node --check public/policy.js && node --check src/worker.js && node --check src/auth.js && node --check src/http.js && node --check src/demo.js && node --check src/operations.js && node --check src/maintenance.js",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "instance:config": "node scripts/instance-config.mjs",
+    "build:instance": "node scripts/instance-config.mjs && wrangler deploy --dry-run --config wrangler.instance.generated.json --outdir dist-instance",
+    "deploy:instance": "node scripts/instance-config.mjs && wrangler deploy --config wrangler.instance.generated.json",
+    "test:runtime": "npm run build && node --test tests/*.integration.mjs",
+    "test:company-e2e": "npm run build && node --test tests/company-ui.e2e.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261110.0-beta",
+    "wrangler": "^4.0.0"
+  },
+  "license": "MIT",
+  "cloudflare": {
+    "bindings": {
+      "PUBLIC_ORIGIN": {
+        "description": "The exact HTTPS origin of this Worker, for example `https://scheduling.example.com` or its `workers.dev` address. Google sign-in redirects to `<PUBLIC_ORIGIN>/auth/google/callback`."
+      },
+      "LIVE_ENABLED": {
+        "description": "Set to `true` once the Google client and encryption key below are set. Leave `false` to keep the service in setup mode."
+      },
+      "GOOGLE_CLIENT_ID": {
+        "description": "Client ID of your own Google OAuth **Web application** client with the Google Calendar API enabled. See the Google OAuth section of https://github.com/YCorpLabs/Scheduling/blob/main/docs/self-hosting.md#3-create-the-google-oauth-client."
+      },
+      "GOOGLE_CLIENT_SECRET": {
+        "description": "Client secret of the same Google OAuth web client."
+      },
+      "TOKEN_ENCRYPTION_KEY": {
+        "description": "32 random bytes, base64. Generate with `openssl rand -base64 32` and keep a copy in a password manager: losing it makes stored calendar grants unreadable."
+      },
+      "RESEND_API_KEY": {
+        "description": "Optional. Resend API key for booking emails. Leave empty to rely on Google Calendar invitations only."
+      },
+      "MAIL_FROM": {
+        "description": "Optional. Sender for booking emails, for example `Scheduling <notifications@example.com>`."
+      }
+    }
+  }
+}

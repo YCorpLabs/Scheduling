@@ -1,0 +1,27 @@
+/* Account deletion uses the same compact dialog and controls as account export. */
+.account-deletion-dialog{width:min(460px,calc(100vw - 24px))}
+.account-deletion-body{display:grid;gap:16px;padding:24px}
+.account-deletion-body h2{font-size:22px;line-height:1.25;letter-spacing:-.035em;margin:0}
+.account-deletion-body p{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
+.account-deletion-body .error{color:var(--danger,#b13e39)}
+.account-deletion-email{color:var(--text)!important;font-weight:550;overflow-wrap:anywhere}
+.account-deletion-facts,.account-deletion-blockers{margin:0;padding:0;list-style:none;display:grid;gap:10px}
+.account-deletion-facts li{display:flex;justify-content:space-between;gap:20px;font-size:14px}
+.account-deletion-facts span{color:var(--muted)}
+.account-deletion-blockers li{padding:12px 14px;border:1px solid var(--line);border-radius:10px;font-size:14px;line-height:1.4}
+.account-deletion-blockers a{display:inline-block;margin-top:6px;color:inherit;text-underline-offset:3px}
+.account-deletion-export{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 0;font-size:14px}
+.account-deletion-export .quiet-button{white-space:nowrap}
+.account-deletion-dialog .booking-detail-footer{gap:8px;flex-wrap:wrap}
+.account-deletion-dialog .booking-detail-footer button{min-height:44px}
+.account-deletion-dialog [data-deletion-status]{outline:none}
+.account-delete-entry .danger-quiet{min-height:44px;padding:0;color:var(--danger,#b13e39);font-size:14px}
+.account-delete-entry{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}
+.account-deletion-page{width:min(460px,calc(100vw - 40px));margin:12vh auto 40px}
+.account-deletion-page .account-deletion-body{padding:0}
+.account-deletion-page .booking-detail-footer{display:flex;justify-content:flex-end;border-top:0;padding:24px 0 0}
+@media(max-width:480px){.account-deletion-body{padding:20px}.account-deletion-dialog .booking-detail-footer{padding:16px 20px}.account-deletion-dialog .booking-detail-footer button{flex:1}.account-deletion-export{align-items:flex-start}.account-deletion-page{margin-top:16vh}}
+.account-deletion-dialog [data-deletion-content]{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.account-deletion-dialog .account-deletion-body{min-height:0;overflow:auto;overscroll-behavior:contain}
+.account-deletion-email{color:var(--ink)!important}
+[data-theme=dark] .account-delete-entry .danger-quiet,[data-theme=dark] .account-deletion-body .error{color:#eeaaa3}

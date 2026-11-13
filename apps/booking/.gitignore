@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+dist/
+dist-instance/
+.dev.vars
+test-results/
+.secrets/
+# Instance overlays and the merged deploy config are private to each operator.
+wrangler.instance.jsonc
+wrangler.instance.generated.json

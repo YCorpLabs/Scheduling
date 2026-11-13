@@ -1,0 +1,64 @@
+// Instance overlay template.
+//
+// Copy this file to wrangler.instance.jsonc (ignored by Git) or to any private
+// path, replace every example value, then run:
+//
+//   SCHEDULING_INSTANCE_CONFIG=wrangler.instance.jsonc npm run deploy:instance
+//
+// Only the keys below belong in an overlay. scripts/instance-config.mjs merges
+// them into the shared wrangler.jsonc and refuses anything else, so Durable
+// Objects, migrations and observability always match the code. Secrets never go
+// here: set them with `wrangler secret put` (see docs/self-hosting.md).
+{
+  // Worker name in your Cloudflare account. Pick it once: a different name is
+  // a different Worker with empty Durable Objects.
+  "name": "scheduling",
+
+  // Optional. Without it Wrangler uses CLOUDFLARE_ACCOUNT_ID or asks you.
+  // "account_id": "<32-character account ID>",
+
+  // Serve only from your own domain. Set workers_dev to true and remove
+  // "routes" to use the workers.dev address instead.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "scheduling.example.com", "custom_domain": true }
+  ],
+
+  "vars": {
+    // Required. The exact HTTPS origin guests and hosts use. Your Google OAuth
+    // client must allow <PUBLIC_ORIGIN>/auth/google/callback.
+    "PUBLIC_ORIGIN": "https://scheduling.example.com",
+    // Turn on after the Google and encryption secrets exist.
+    "LIVE_ENABLED": "true",
+
+    // Booking emails. Google Calendar invitations work without these.
+    // "cloudflare" uses the EMAIL binding below; "resend" uses RESEND_API_KEY.
+    "NOTIFICATION_PROVIDER": "cloudflare",
+    "MAIL_FROM": "Scheduling <notifications@scheduling.example.com>",
+
+    // Optional comma-separated hosts allowed for generic signed webhooks.
+    // "INTEGRATION_WEBHOOK_HOSTS": "hooks.example.com",
+
+    // Optional identity. Unset values fall back to neutral defaults.
+    // "PRODUCT_NAME": "Scheduling",           // sign-in heading, Studio, page titles
+    // "BRAND_NAME": "Acme",                   // booking-page footer and titles
+    // "DESKTOP_APP_NAME": "Acme Mail",         // desktop client named on /device
+    // "ORGANIZATION_NAME": "Acme Inc.",        // sign-in header
+    // "ORGANIZATION_URL": "https://acme.example.com",
+    // "ORGANIZATION_MARK_PATH": "M8 8h16v16H8z", // SVG path in a 32x32 mark
+    // "SUPPORT_EMAIL": "support@acme.example.com",
+    // "PRIVACY_URL": "https://acme.example.com/privacy",
+    // "TERMS_URL": "https://acme.example.com/terms",
+    // "WEBHOOK_USER_AGENT": "Acme-Scheduling-Webhooks/1"
+  },
+
+  // Cloudflare Email Sending. The sender must be on a domain onboarded for
+  // Email Sending in your account. Remove this block when using Resend.
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["notifications@scheduling.example.com"]
+    }
+  ]
+}

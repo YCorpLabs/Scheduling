@@ -1,0 +1,54 @@
+title = "Scheduling reviewed synthetic-fixture and prose exceptions"
+
+# Keep all upstream detection rules. Exceptions apply only to generic-api-key,
+# with both an exact file path and an exact complete line. Any edited line
+# or additional credential on that line requires review rather than suppression.
+# regexTarget is Gitleaks' line-match field; an optional leading newline handles
+# its fragment location convention without allowing other surrounding content.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Reviewed documentation prose; exact unchanged lines only"
+condition = "AND"
+paths = ['''(^|/)apps/booking/README\.md$''']
+regexTarget = "line"
+regexes = [
+    '''^\n?Unit\ tests\ cover\ policy/DST,\ grants,\ provider\ validation,\ concurrent\ booking\ admission,\ retries/eviction,\ capability\ access,\ cancellation/rescheduling\ races,\ retention\ and\ notification\ delivery\.\ `test:runtime`\ builds\ and\ exercises\ the\ actual\ Worker/Durable\ Objects\ with\ mocked\ Google\ through\ HTTP,\ including\ OAuth\ replay,\ tenant\ isolation\ and\ the\ complete\ booking\ lifecycle\.\ Browser\ tests\ cover\ live\ UI\ \(mocked\ APIs\),\ loopback\ reservation\ flow,\ responsive\ light/dark\ layouts\ and\ embeds\.\ `BOOKING_BROWSER`\ selects\ an\ executable;\ `BOOKING_ENGINE=webkit`\ selects\ installed\ WebKit\.\ Real\-provider\ and\ regional\ performance\ checks\ remain\ separate\ acceptance\ work\.$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed synthetic test fixture; exact unchanged lines only"
+condition = "AND"
+paths = ['''(^|/)apps/booking/tests/ledger\.test\.mjs$''']
+regexTarget = "line"
+regexes = [
+    '''^\n?\ assert\.equal\(\(await\ reserve\(ledger,'other',\{\.\.\.data,idempotencyKey:'replacement12345678'\}\)\)\.booking\.status,'failed'\);assert\.equal\(attempts,2\);$''',
+    '''^\n?\ assert\.equal\(\(await\ reserve\(ledger,'other',\{\.\.\.data,intakeRevision:await\ intakeRevision\(ledger\.type\('other'\)\),idempotencyKey:'competing\-request\-key'\}\)\)\.status,409\);assert\.equal\(\(await\ ledger\.disconnect\('a'\)\)\.status,409\);const\ accepted=await\ approve\(ledger,first\.booking\);assert\.equal\(accepted\.booking\.status,'confirmed'\);assert\.equal\(accepted\.booking\.version,2\);assert\.equal\(effects\.created,1\);assert\.ok\(ledger\.rows\('SELECT\ id\ FROM\ live_jobs'\)\.length\);assert\.equal\(\(await\ approve\(ledger,first\.booking\)\)\.booking\.id,first\.booking\.id\);assert\.equal\(effects\.created,1\);assert\.equal\(\(await\ ledger\.decideBooking\(first\.booking\.id,\{action:'reject',expectedVersion:1,key:'approval\-decision\-key\-123'\}\)\)\.status,409\);$''',
+    '''^\n?\ const\ \{ledger,ready,effects\}=setup\(\);await\ ready\(\);setIntroPolicy\(ledger,\{requiresApproval:true\}\);const\ first=await\ reserve\(ledger,'intro',details\(\)\),decision=\{action:'reject',expectedVersion:1,key:'reject\-decision\-12345',reason:'Not\ this\ week'\};const\ rejected=await\ ledger\.decideBooking\(first\.booking\.id,decision\);assert\.equal\(rejected\.booking\.status,'rejected'\);assert\.equal\(rejected\.booking\.rejectionReason,'Not\ this\ week'\);assert\.equal\(\(await\ ledger\.decideBooking\(first\.booking\.id,decision\)\)\.booking\.status,'rejected'\);assert\.equal\(\(await\ reserve\(ledger,'intro',details\(\)\)\)\.booking\.status,'rejected'\);$''',
+    '''^\n?\ const\ \{ledger,ready\}=setup\(\);await\ ready\(\);setIntroPolicy\(ledger,\{requiresApproval:true\}\);const\ result=await\ reserve\(ledger,'intro',details\(\)\);assert\.equal\(jobs\(ledger\)\.length,0\);await\ ledger\.decideBooking\(result\.booking\.id,\{action:'reject',expectedVersion:1,key:'no\-delivery\-reject\-123'\}\);assert\.equal\(jobs\(ledger\)\.length,0\);ledger\.env\.RESEND_API_KEY='test';ledger\.env\.MAIL_FROM='host@example\.test';const\ next=await\ reserve\(ledger,'intro',details\('guest\-only\-no\-owner\-email'\)\);assert\.equal\(next\.booking\.status,'awaiting_approval'\);assert\.deepEqual\(jobs\(ledger\)\.map\(j=>j\.kind\),\['approval_requested_guest'\]\);$''',
+    '''^\n?const\ approve=\(ledger,b,key='approval\-decision\-key\-123'\)=>ledger\.decideBooking\(b\.id,\{action:'approve',expectedVersion:b\.version,key\}\);$''',
+    '''^\n?test\('one\ host\ conflicts\ across\ types;\ keys\ bind\ payload;\ only\ hash\ tokens\ stored',async\(\)=>\{const\ \{ledger,ready,effects\}=setup\(\);await\ ready\(\);const\ data=details\(\);const\ first=await\ reserve\(ledger,'intro',data\);assert\.equal\(first\.booking\.status,'confirmed'\);assert\.equal\(effects\.created,1\);assert\.equal\(\(await\ reserve\(ledger,'other',\{\.\.\.data,idempotencyKey:'other123456789012'\}\)\)\.status,409\);assert\.equal\(\(await\ reserve\(ledger,'intro',\{\.\.\.data,email:'other@example\.test'\}\)\)\.status,409\);const\ retry=await\ reserve\(ledger,'intro',data\);assert\.equal\(retry\.booking\.id,first\.booking\.id\);assert\.equal\(retry\.managementToken,first\.managementToken\);const\ stored=ledger\.booking\(first\.booking\.id\);assert\.ok\(stored\.tokenHash\);assert\.ok\(!JSON\.stringify\(stored\)\.includes\(first\.managementToken\)\);assert\.equal\(\(await\ ledger\.manage\(first\.booking\.id,'bad'\)\)\.status,404\);assert\.equal\(\(await\ ledger\.manage\(first\.booking\.id,first\.managementToken\)\)\.booking\.email,data\.email\);\}\);$''',
+    '''^\n?test\('synchronous\ durable\ holds\ admit\ only\ one\ concurrent\ guest',async\(\)=>\{let\ release;const\ gate=new\ Promise\(r=>release=r\);const\ \{ledger,ready,effects\}=setup\(\{freeBusy:async\(\)=>\{await\ gate;return\ \[\];\}\}\);await\ ready\(\);const\ data=details\(\);const\ one=reserve\(ledger,'intro',data\);const\ two=reserve\(ledger,'other',\{\.\.\.data,idempotencyKey:'second1234567890'\}\);await\ new\ Promise\(r=>setTimeout\(r,20\)\);release\(\);const\ result=await\ Promise\.all\(\[one,two\]\);assert\.equal\(result\.filter\(r=>r\.booking\?\.status==='confirmed'\)\.length,1\);assert\.equal\(result\.filter\(r=>r\.status===409\)\.length,1\);assert\.equal\(effects\.created,1\);\}\);$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed synthetic test fixture; exact unchanged lines only"
+condition = "AND"
+paths = ['''(^|/)apps/booking/tests/maintenance\.test\.mjs$''']
+regexTarget = "line"
+regexes = [
+    '''^\n?\ \ assert\.equal\(\(await\ ledger\.decideBooking\(confirmed\.booking\.id,\{action:'approve',expectedVersion:1,key:'maintenance\-decision\-0001'\}\)\)\.code,'maintenance_frozen'\);$''',
+]
+
+[[rules.allowlists]]
+description = "Reviewed synthetic maintenance approval fixture; exact unchanged line only"
+condition = "AND"
+paths = ['''(^|/)apps/booking/tests/maintenance\.test\.mjs$''']
+regexTarget = "line"
+regexes = [
+    '''^\n?\ \ \ \ const\ pending=ledger\.decideBooking\(requested\.booking\.id,\{action:'approve',expectedVersion:1,key:'maintenance\-approval\-race\-0001'\}\);$''',
+]

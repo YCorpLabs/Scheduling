@@ -1,0 +1,78 @@
+// Shared, operator-neutral Worker configuration.
+//
+// Used as-is by local development (npm run dev), the test suites, the dry-run
+// build (npm run build) and the Deploy to Cloudflare button. It names no
+// operator: no routes, origin, sender or branding. A deployed instance adds
+// those through an instance overlay that scripts/instance-config.mjs merges into
+// this file. See docs/self-hosting.md and wrangler.instance.example.jsonc.
+//
+// Keep Durable Object class names and migration tags stable. Renaming or
+// reordering them orphans stored bookings, sessions and calendar grants.
+// Keep traces disabled: they would record OAuth callback codes and private
+// booking paths.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "scheduling",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-11-10",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*",
+      "/auth/*",
+      "/device",
+      "/device-ui.js"
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HOSTS",
+        "class_name": "BookingHost"
+      },
+      {
+        "name": "LIVE_HOSTS",
+        "class_name": "LiveBookingHost"
+      },
+      {
+        "name": "AUTH",
+        "class_name": "AuthStore"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "BookingHost"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "LiveBookingHost",
+        "AuthStore"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false
+    },
+    "traces": {
+      "enabled": false
+    }
+  },
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "workers_dev": true,
+  "preview_urls": false
+}

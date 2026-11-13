@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in Scheduling does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go through SECURITY.md.
+        Do not paste booking links, guest details, tokens or calendar data.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open /studio
+        2. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Self-hosted instance
+        - Local development (npm run dev)
+        - The hosted service
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or release
+      description: Output of `git rev-parse --short HEAD`, if self-hosted.
+  - type: textarea
+    id: details
+    attributes:
+      label: Browser, logs and other details
+      description: Browser and OS, redacted console or Worker log lines, screenshots without personal data.

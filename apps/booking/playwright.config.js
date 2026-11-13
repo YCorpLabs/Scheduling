@@ -1,0 +1,2 @@
+import { defineConfig } from '@playwright/test';
+export default defineConfig({testDir:'./tests',testMatch:'**/*.spec.js',workers:1,webServer:{command:'npx wrangler dev --ip 127.0.0.1 --port 8791 --infer-origin-from-routes=false --var LIVE_ENABLED:false',url:'http://127.0.0.1:8791',reuseExistingServer:false},use:{headless:true,browserName:process.env.BOOKING_ENGINE||'chromium',...(process.env.BOOKING_BROWSER?{launchOptions:{executablePath:process.env.BOOKING_BROWSER}}:{})},reporter:'list'});

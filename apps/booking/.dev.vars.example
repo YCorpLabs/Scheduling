@@ -1,0 +1,13 @@
+# Use a separate Google Web Application OAuth client. Never reuse desktop tokens.
+# Register this exact callback in Google Cloud:
+# http://127.0.0.1:8788/auth/google/callback
+PUBLIC_ORIGIN=http://127.0.0.1:8788
+# Set to true once the Google client and encryption key below are set. Leave false to keep the service in setup mode.
+LIVE_ENABLED=false
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+# Generate with: openssl rand -base64 32
+TOKEN_ENCRYPTION_KEY=
+# Optional application reminder/confirmation delivery. Google invitations work independently.
+RESEND_API_KEY=
+MAIL_FROM=

@@ -1,0 +1,22 @@
+/* Host: guest change cutoffs in Booking rules */
+.change-rules{border:0;padding:0;margin:18px 0 0;min-width:0}.change-rules legend{font-size:13px;font-weight:600;padding:0;margin-bottom:10px}
+.change-rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.change-rule{min-width:0}
+.change-custom{display:flex;align-items:center;gap:6px;margin-top:6px}.change-custom[hidden]{display:none}
+.change-custom input{width:76px;flex:0 0 76px;min-height:36px;padding:6px 8px;font-variant-numeric:tabular-nums}.change-custom select{flex:1;min-width:0;min-height:36px;padding:6px 8px}.change-custom span{font-size:12px;color:var(--muted)}
+.change-error{margin:6px 0 0;font-size:12px;color:#b13e39}.change-error:empty{display:none}
+
+/* Guest: deadline note, closed state and optional reason */
+.change-note{font-size:12px;line-height:1.6;color:var(--muted);margin:0}
+.guest-form .change-note{margin-top:-4px}
+.success .change-note,.manage-change-note{margin-top:12px}
+.change-closed{font-size:13px;line-height:1.6;color:var(--muted);margin-top:20px}
+.cancel-confirm{display:grid;gap:12px;margin-top:24px;width:100%}
+.cancel-confirm textarea{min-height:72px}
+.cancel-confirm .row{flex-wrap:wrap}
+.cancel-reason-label .optional{font-weight:400}
+.cancel-reason-readback{margin-top:12px;font-size:13px;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.booking-detail-list dd.cancel-reason{white-space:pre-wrap;overflow-wrap:anywhere}
+.host-cancel-confirm{display:grid;gap:8px;width:100%}.host-cancel-confirm textarea{min-height:64px}
+@media(max-width:520px){.change-rule-grid{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.change-custom,.cancel-confirm{transition:none;animation:none}}

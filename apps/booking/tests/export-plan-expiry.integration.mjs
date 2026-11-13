@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
+test('export-only plans clear physically without changing ordinary credential TTL',async()=>{
+ const bundle=await build({stdin:{contents:`import {AuthStore as Base} from './src/auth.js';export class ExportStore extends Base{raw(){return this.sql.exec('SELECT COUNT(*) AS count FROM state').toArray()[0].count;}}export default{async fetch(request,env){const url=new URL(request.url),stub=env.AUTH.getByName(url.searchParams.get('name')||'export');if(url.pathname==='/plan'){await stub.putExport({kind:'account-export',version:1},30);return Response.json({ok:true});}if(url.pathname==='/ordinary'){await stub.put({ordinary:true},30);return Response.json({ok:true});}if(url.pathname==='/bad'){try{await stub.putExport({kind:'credential'},30);return Response.json({bad:true});}catch{return new Response(null,{status:400});}}return Response.json({count:await stub.raw()});}};`,resolveDir:new URL('..',import.meta.url).pathname},bundle:true,format:'esm',platform:'browser',external:['cloudflare:workers'],write:false});
+ const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'export-expiry',modules:true,script:bundle.outputFiles[0].text,compatibilityDate:'2026-11-10',durableObjects:{AUTH:{className:'ExportStore',useSQLite:true}},outboundService:()=>{throw Error('Unexpected provider call');}}]}));
+ try{assert.equal((await mf.dispatchFetch('http://localhost/bad')).status,400);await mf.dispatchFetch('http://localhost/plan');await mf.dispatchFetch('http://localhost/ordinary?name=ordinary');await new Promise(resolve=>setTimeout(resolve,150));assert.equal((await (await mf.dispatchFetch('http://localhost/raw')).json()).count,0);assert.equal((await (await mf.dispatchFetch('http://localhost/raw?name=ordinary')).json()).count,1);}finally{await mf.dispose();}
+});
