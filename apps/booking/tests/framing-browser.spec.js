@@ -2,14 +2,14 @@ import {test,expect} from '@playwright/test';
 
 test('asset-first and Worker responses protect owner/management pages while guest embeds stay usable',async({page,request})=>{
   for(const path of ['/','/studio','/manage/host/booking']){
-    const response=await request.get('http://127.0.0.1:8791'+path);
+    const response=await request.get((process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791')+path);
     expect(response.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
   }
   for(const path of ['/book?embed=1','/b/h_fixture/intro?embed=1']){
-    const response=await request.get('http://127.0.0.1:8791'+path);
+    const response=await request.get((process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791')+path);
     expect(response.headers()['content-security-policy']).not.toContain('frame-ancestors');
   }
-  await page.goto('http://127.0.0.1:8791/site');
+  await page.goto((process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791')+'/site');
   // A same-origin frame is also forbidden: this catches CSP response policies
   // that look correct in text but are not actually enforced by the browser.
   const rejected=page.waitForEvent('console',{predicate:message=>message.type()==='error'&&message.text().includes('frame-ancestors')});

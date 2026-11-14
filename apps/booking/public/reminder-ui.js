@@ -1,5 +1,5 @@
-import {followUpMarkup,bindFollowUp,readFollowUp} from '/followup-ui.js';
-import {reminderOffsets} from '/policy.js';
+import {followUpMarkup,bindFollowUp,readFollowUp} from './followup-ui.js';
+import {reminderOffsets} from './policy.js';
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const choices=[5,15,30,60,120,1440,2880,10080];

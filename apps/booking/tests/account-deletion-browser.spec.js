@@ -22,7 +22,7 @@ async function mock(page,options={}){
   return json({});
  });return state;
 }
-async function open(page){await page.goto(base+'/studio');await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Manage account',exact:true}).click();await page.getByRole('button',{name:'Delete account…',exact:true}).click();return page.getByRole('dialog',{name:'Delete account',exact:true});}
+async function open(page){await page.goto(base+'/studio');await page.locator('#account-trigger:visible, [data-more]:visible').first().click();await page.getByRole('button',{name:'Manage account',exact:true}).click();await page.getByRole('button',{name:'Delete account…',exact:true}).click();return page.getByRole('dialog',{name:'Delete account',exact:true});}
 const confirms=state=>state.requests.filter(r=>r.path.endsWith('/deletion/confirm'));
 
 test('deletion is an explicit confirmation with export available first, and Cancel returns focus',async({page})=>{

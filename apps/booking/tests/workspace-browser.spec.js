@@ -7,7 +7,7 @@ const caps=role=>({readBookings:true,readAnalytics:true,approveBookings:role!=='
 const settingsFor=(hostId,name,title)=>({revision:'A'.repeat(43),hostId,profile:{name,email:'ada@example.com'},accounts:[{id:'a',connected:true,email:'ada@example.com',destinationCalendarId:'primary',conflictCalendarIds:['primary']}],meetingTypes:[{...DEFAULT,id:'intro',slug:'intro',title,accountId:'a',calendarId:'primary'}]});
 
 // Stateful mock of the agreed workspace and integration routes. Nothing here reaches a provider.
-async function mock(page,{role='admin',companies=true,authenticated=true,email='ada@example.com',hold,inspect,onboarding=false}={}){
+async function mock(page,{role='admin',companies=true,authenticated=true,email='ada@example.com',hold,inspect}={}){
   const state={requests:[],role,members:[{id:'h_me',email:'ada@example.com',role},{id:'h_owner',email:'owner@acme.test',role:'owner'},{id:'h_bo',email:'bo@acme.test',role:'member'}],invitations:[{id:'inv1',email:'cy@acme.test',role:'viewer',expiresAt:Date.parse('2026-11-19T12:00:00Z')}],companies:companies?[{id:'h_acmeacmeacmeacmeacmeacme',name:'Acme'}]:[],integrations:[],deliveries:[],hostsReady:false,held:{}};
   if(role==='owner')state.members=[{id:'h_me',email:'ada@example.com',role:'owner'},{id:'h_bo',email:'bo@acme.test',role:'member'}];
   const listing=()=>({workspaces:[{id:'h_me',name:'Personal',role:'owner',personal:true,capabilities:caps('owner')},...state.companies.map(c=>({id:c.id,name:c.name,role:c.role||state.role,personal:false,capabilities:caps(c.role||state.role)}))],activeWorkspaceId:'h_me'});
@@ -22,7 +22,6 @@ async function mock(page,{role='admin',companies=true,authenticated=true,email='
     if(path==='/api/live/workspaces'&&req.method()==='GET')return json(listing());
     if(path==='/api/live/workspaces'){const c={id:'h_'+'n'.repeat(24),name:body.name};state.companies.push({...c,role:'owner'});return json({workspace:{...c,role:'owner',personal:false,capabilities:caps('owner')}});}
     if(ws&&!state.companies.some(c=>c.id===ws))return json({error:'Workspace not found.'},404);
-    if(path==='/api/live/settings'&&!ws&&onboarding)return json({...settingsFor('h_me','Ada','Personal intro'),profile:{name:'Ada',profileSetupRequired:true},accounts:[]});
     if(path==='/api/live/settings')return json(ws?{...settingsFor(ws,'Acme','Acme demo'),workspace:{id:ws,role:state.role,capabilities:caps(state.role)}}:settingsFor('h_me','Ada','Personal intro'));
     if(path==='/api/live/calendars')return json({accounts:[{id:'a',calendars:[{id:'primary',summary:'Work',accessRole:'owner'}]}]});
     if(path==='/api/live/availability')return json({slots:[{start:state.moveStart||(state.moveStart=Date.now()+172800000),end:(state.moveStart)+1800000}]});
@@ -47,11 +46,14 @@ async function mock(page,{role='admin',companies=true,authenticated=true,email='
     if(path==='/api/live/integrations/test'){state.deliveries.unshift({id:'dtest',integrationId:body.id,eventId:'e',eventType:'integration.test',state:'queued',attempts:0,nextAttemptAt:Date.now(),lastAttemptAt:null,errorCode:null});return json({ok:true,deliveryId:'dtest',state:'queued'});}
     if(path==='/api/live/integrations/retry'){const d=state.deliveries.find(x=>x.id===body.deliveryId);d.state=body.action==='discard'?'cancelled':'queued';d.errorCode=body.action==='discard'?'operator_discarded':null;return json({ok:true});}
     if(path==='/api/live/operations')return json({issues:[]});
+    if(path==='/api/live/my-calendar')return json({member:{id:'h_me',email:'ada@example.com'},account:null,calendars:[],schedule:{zone:'UTC',weeklyHours:{},dateOverrides:{}},scheduleConfigured:false,readiness:'not_connected',revision:'rev1'});
+    if(path.startsWith('/api/live/my-calendar/events'))return json({events:[],calendars:[]});
     return json({error:'Not mocked'},404);
   });
   return state;
 }
 const switcher=page=>page.locator('#workspace-trigger');
+const nav=page=>page.getByRole('navigation',{name:'Scheduling'});
 async function switchTo(page,name){await switcher(page).click();await page.getByRole('menuitemradio',{name:new RegExp(name)}).click();}
 
 test('workspace switcher scopes company requests, keeps identity personal and survives reload and theme',async({page})=>{
@@ -68,10 +70,10 @@ test('workspace switcher scopes company requests, keeps identity personal and su
   expect(state.requests.filter(r=>r.path==='/api/live/workspaces').every(r=>r.ws===null)).toBeTruthy();
   await expect(page.locator('.host-identity small')).toHaveText('ada@example.com');await expect(page.locator('.host-identity strong')).toHaveText('Ada');
   await expect(page.getByRole('button',{name:'Team'})).toBeVisible();await expect(page.getByRole('button',{name:'Integrations'})).toBeVisible();
-  await page.getByRole('button',{name:'Calendars',exact:true}).click();await expect(page.locator('a[href^="/auth/google?connect=1&workspace=h_acme"]').first()).toBeVisible();
-  await page.setViewportSize({width:1440,height:960});await page.getByRole('button',{name:'Booking links',exact:true}).click();await switcher(page).click();await page.screenshot({path:`${shots}/workspace-switcher.png`});await page.keyboard.press('Escape');
-  await page.reload();await expect(page.locator('.booking-link-title')).toHaveText('Acme demo');
-  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.locator('.booking-link-title')).toHaveText('Acme demo');await expect(switcher(page)).toContainText('Acme');
+  await nav(page).getByRole('button',{name:'Availability',exact:true}).click();await expect(page.locator('a[href^="/auth/google?connect=1&workspace=h_acme"]').first()).toBeVisible();
+  await page.setViewportSize({width:1440,height:960});await nav(page).getByRole('button',{name:'Links',exact:true}).click();await switcher(page).click();await page.screenshot({path:`${shots}/workspace-switcher.png`});await page.keyboard.press('Escape');
+  await page.reload();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();
+  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();await expect(switcher(page)).toContainText('Acme');
 });
 
 test('stored selection from another account or a removed company never leaks',async({page})=>{
@@ -99,9 +101,9 @@ test('unsaved meeting edits are guarded when switching',async({page})=>{
 test('late responses from the previous workspace never repaint the new one',async({page})=>{
   const state=await mock(page,{hold:['/api/live/bookings|personal','/api/live/analytics|personal']});await page.goto(base+'/studio#link=intro');
   await page.getByRole('button',{name:'Bookings',exact:true}).click();await expect.poll(()=>!!state.held['/api/live/bookings|personal']).toBeTruthy();
-  await switchTo(page,'Acme');await expect(page.locator('.booking-row')).toContainText('Acme booking');
-  state.release('/api/live/bookings|personal');await page.waitForTimeout(150);await expect(page.locator('.booking-row')).toContainText('Acme booking');await expect(page.getByText('Personal booking')).toHaveCount(0);
-  await switchTo(page,'Ada');await page.getByRole('button',{name:'Booking stats',exact:true}).click();await expect.poll(()=>!!state.held['/api/live/analytics|personal']).toBeTruthy();
+  await switchTo(page,'Acme');await expect(page.locator('.bk-row')).toContainText('Acme booking');
+  state.release('/api/live/bookings|personal');await page.waitForTimeout(150);await expect(page.locator('.bk-row')).toContainText('Acme booking');await expect(page.getByText('Personal booking')).toHaveCount(0);
+  await switchTo(page,'Ada');await nav(page).getByRole('button',{name:'Links',exact:true}).click();await page.getByRole('button',{name:'Stats',exact:true}).click();await expect.poll(()=>!!state.held['/api/live/analytics|personal']).toBeTruthy();
   await switchTo(page,'Acme');await expect(page.locator('.analytics-card').first()).toContainText('7');
   state.release('/api/live/analytics|personal');await page.waitForTimeout(150);await expect(page.locator('.analytics-card').first()).toContainText('7');await expect(switcher(page)).toContainText('Acme');
 });
@@ -144,8 +146,11 @@ test('team: invite link, revoke, role, transfer and removal call the backend wit
 test('members and viewers get read-only company access with no admin settings',async({page})=>{
   await mock(page,{role:'viewer'});await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');
   await expect(page.getByRole('heading',{name:'Bookings'})).toBeVisible();
-  for(const name of ['Booking links','Calendars','Troubleshooting','Integrations'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Edit profile'})).toHaveCount(0);await expect(page.getByRole('button',{name:'Company profile'})).toHaveCount(0);
+  await expect(nav(page).getByRole('button')).toHaveText(['Bookings','Team']);
+  for(const name of ['Links','Availability','Integrations'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
+  await page.locator('#account-trigger').click();const menu=page.getByRole('dialog',{name:'Account settings'});await expect(menu.getByRole('button',{name:'Dark mode'})).toBeVisible();
+  for(const name of [/Troubleshooting/,'Edit profile','Change profile picture','Company profile'])await expect(menu.getByRole('button',{name})).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'Team'}).click();await expect(page.locator('.team-row')).toHaveCount(3);await expect(page.locator('[data-manage-member]')).toHaveCount(0);await expect(page.getByText('Pending invitations')).toHaveCount(0);await expect(page.getByRole('button',{name:'Invite',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Leave Acme'}).click();const leave=page.getByRole('dialog',{name:'Leave Acme?'});await expect(leave.getByRole('button',{name:'Cancel'})).toBeFocused();await leave.getByRole('button',{name:'Leave Acme',exact:true}).click();
   await expect(switcher(page)).toContainText('Ada');await expect(page.locator('#host-status')).toHaveText('You left Acme');await switcher(page).click();await expect(page.getByRole('menuitemradio',{name:/Acme/})).toHaveCount(0);
@@ -254,24 +259,23 @@ test('company booking management uses authenticated actions and never a guest li
  await page.getByRole('dialog',{name:'Booking details'}).getByRole('button',{name:'Cancel booking',exact:true}).click();await page.getByRole('dialog',{name:'Booking details'}).getByRole('button',{name:'Cancel booking',exact:true}).click();await expect(page.getByRole('dialog',{name:'Booking details'}).getByText('Cancelled',{exact:true})).toBeVisible();expect(state.requests.find(r=>r.path.endsWith('/cancel')).body).toEqual({});
 });
 
-test('new Google account creates a named profile from a website without a personal or company choice',async({page})=>{
-  const state=await mock(page,{companies:false,onboarding:true});await page.goto(base+'/studio');
-  const dialog=page.getByRole('dialog',{name:'Create your profile'});await expect(dialog.getByLabel('Name',{exact:true})).toBeFocused();
-  await expect(dialog).not.toContainText('Personal');await expect(dialog).not.toContainText('Company');
+test('a new team is named from its website alone and the dialog fits a phone',async({page})=>{
+  const state=await mock(page,{companies:false});await page.goto(base+'/studio');await switcher(page).click();await page.getByRole('menuitem',{name:'New team',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'New team'});await expect(dialog.getByLabel('Name',{exact:true})).toBeFocused();
   await dialog.getByLabel('Website',{exact:false}).fill('globex.example');
-  await page.setViewportSize({width:390,height:844});const bounds=await dialog.boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(390);expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();await page.screenshot({path:`${shots}/profile-onboarding-mobile.png`});
-  await dialog.getByRole('button',{name:'Create profile',exact:true}).click();await expect(dialog).toHaveCount(0);
-  const request=state.requests.find(r=>r.path==='/api/live/workspaces'&&r.method==='POST');expect(request.body).toEqual({name:'Globex',website:'https://globex.example/',firstProfile:true});
-  await expect(switcher(page)).toContainText('Globex');await expect(page.getByRole('button',{name:'Team',exact:true})).toBeVisible();
-  await page.reload();await expect(switcher(page)).toContainText('Globex');await expect(page.getByRole('dialog',{name:'Create your profile'})).toHaveCount(0);
+  await page.setViewportSize({width:390,height:844});const bounds=await dialog.boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(390);expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();await page.screenshot({path:`${shots}/team-create-mobile.png`});
+  await page.setViewportSize({width:1280,height:900});await dialog.getByRole('button',{name:'Create team',exact:true}).click();await expect(dialog).toHaveCount(0);
+  const request=state.requests.find(r=>r.path==='/api/live/workspaces'&&r.method==='POST');expect(request.body).toEqual({name:'Globex',website:'https://globex.example/'});
+  await expect(switcher(page)).toContainText('Globex');await expect(nav(page).getByRole('button',{name:'Team',exact:true})).toBeVisible();
+  await page.reload();await expect(switcher(page)).toContainText('Globex');
 });
 
 test('profile creation accepts a person name and rejects credential-bearing websites',async({page})=>{
-  const state=await mock(page,{companies:false});await page.goto(base+'/studio');await switcher(page).click();await page.getByRole('menuitem',{name:'New profile',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'New profile'});await dialog.getByLabel('Name',{exact:true}).fill('Riley');await dialog.getByLabel('Website',{exact:false}).fill('https://secret@example.com');
-  await dialog.getByRole('button',{name:'Create profile',exact:true}).click();await expect(dialog.getByRole('alert')).toHaveText('Enter a valid website address.');
+  const state=await mock(page,{companies:false});await page.goto(base+'/studio');await switcher(page).click();await page.getByRole('menuitem',{name:'New team',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'New team'});await dialog.getByLabel('Name',{exact:true}).fill('Riley');await dialog.getByLabel('Website',{exact:false}).fill('https://secret@example.com');
+  await dialog.getByRole('button',{name:'Create team',exact:true}).click();await expect(dialog.getByRole('alert')).toHaveText('Enter a valid website address.');
   expect(state.requests.filter(r=>r.path==='/api/live/workspaces'&&r.method==='POST')).toHaveLength(0);
-  await dialog.getByLabel('Website',{exact:false}).fill('');await dialog.getByRole('button',{name:'Create profile',exact:true}).click();await expect(switcher(page)).toContainText('Riley');
+  await dialog.getByLabel('Website',{exact:false}).fill('');await dialog.getByRole('button',{name:'Create team',exact:true}).click();await expect(switcher(page)).toContainText('Riley');
 });
 
 test('integration cards open the selected destination with the webhook gate intact',async({page})=>{
@@ -283,7 +287,7 @@ test('integration cards open the selected destination with the webhook gate inta
     if(kind==='Webhook')await expect(dialog.getByRole('button',{name:'Add integration',exact:true})).toBeDisabled();
     await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Connect '+kind,exact:true})).toBeFocused();
   }
-  await page.setViewportSize({width:390,height:844});await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.locator('.integration-connect')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
+  await page.setViewportSize({width:390,height:844});await page.locator('[data-more]').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.locator('.integration-connect')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
 });
 
 test('an image still decoding cannot be applied to a profile selected afterwards',async({page})=>{

@@ -1,14 +1,18 @@
 import {test,expect} from '@playwright/test';
 import {DEFAULT} from '../public/policy.js';
-const base=process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791',hostId='h_abcdefghijklmnopqrstuvwx';
+const base=process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791',hostId='h_abcdefghijklmnopqrstuvwx',owner='h_'+'O'.repeat(24);
 const a={id:'a',email:'ada@company.test',connected:true,destinationCalendarId:'ada@company.test',conflictCalendarIds:['ada@company.test']},b={id:'b',email:'bo@company.test',connected:true,destinationCalendarId:'bo@company.test',conflictCalendarIds:['bo@company.test']};
 async function fixture(page,{team=null,guest=false}={}){
  let settings={hostId,revision:'A'.repeat(43),profile:{name:'Company'},accounts:[a,b],availabilitySchedules:[{id:'work',name:'Work hours',zone:'UTC',weeklyHours:{1:[{start:540,end:1020}]},dateOverrides:{}}],defaultAvailabilityScheduleId:null,meetingTypes:[{...DEFAULT,id:'intro',slug:'intro',title:'Intro',host:'Company',published:true,accountId:'a',calendarId:a.destinationCalendarId,teamScheduling:team}]};const writes=[];let booked;
  const publicTeam=team?{mode:team.mode,hosts:team.hosts.map(({id,name})=>({id,name})),revision:'reviewed-team'}:null,start=Date.now()+172800000;
  const slots=[{start,end:start+1800000,hostIds:['ada']},{start:start+3600000,end:start+5400000,hostIds:['bo']},{start:start+7200000,end:start+9000000,hostIds:['ada','bo']}];
  await page.route('**/api/**',route=>{const req=route.request(),path=new URL(req.url()).pathname;let data;
- if(path==='/api/bootstrap')data={mode:'live',authenticated:!guest,hostId,email:'owner@company.test',features:{reminders:true}};
- else if(path==='/api/live/workspaces')return route.fulfill({status:404,json:{error:'Unsupported'}});
+ if(path==='/api/bootstrap')data={mode:'live',authenticated:!guest,hostId:owner,email:'owner@company.test',features:{reminders:true}};
+ // Hosts are a team feature: the Studio runs in the company profile.
+ else if(path==='/api/live/workspaces')data={activeWorkspaceId:hostId,workspaces:[{id:owner,personal:true,role:'owner',name:'Owner'},{id:hostId,name:'Company',role:'owner',capabilities:{manageSettings:true,manageMembers:true,manageIntegrations:true}}]};
+ else if(path==='/api/live/bookings')data={bookings:[]};
+ else if(path==='/api/live/calendar-contributions')data={contributions:[]};
+ else if(path==='/api/live/calendar-events'||path==='/api/live/my-calendar/events')data={events:[],calendars:[]};
  else if(path==='/api/live/settings'){if(req.method()==='POST'){const body=req.postDataJSON();expect(body.expectedRevision).toBe(settings.revision);writes.push(body.patch);settings={...settings,...body.patch,revision:'B'.repeat(43)};data={settings,revision:settings.revision};}else data=settings;}
  else if(path==='/api/live/calendars')data={accounts:[a,b].map(account=>({id:account.id,calendars:[{id:account.destinationCalendarId,summary:account.id==='a'?'Ada work':'Bo work',accessRole:'owner'},{id:'holidays',summary:'Holidays',accessRole:'reader'}]}))};
  else if(path.endsWith('/availability')){const {teamScheduling,...config}=settings.meetingTypes[0];data={mode:'live',config:{...config,...(publicTeam?{team:publicTeam}:{})},slots};}
@@ -20,11 +24,31 @@ async function fixture(page,{team=null,guest=false}={}){
 }
 const hosts=[{id:'ada',name:'Ada',accountId:'a',useDefaultCalendar:true,calendarId:'',conflictCalendarIds:null,scheduleId:null},{id:'bo',name:'Bo',accountId:'b',useDefaultCalendar:true,calendarId:'',conflictCalendarIds:null,scheduleId:null}];
 
-test('each booking link configures any, guest choice or everyone with explicit host calendars and hours',async({page})=>{
- const state=await fixture(page);await page.goto(base+'/studio#link=intro');await page.getByRole('tab',{name:'Hosts',exact:true}).click();await expect(page.getByRole('radio',{name:'One host',exact:true})).toBeChecked();await page.getByRole('radio',{name:'Any available host',exact:true}).check();
- const ada=page.locator('[data-team-host][data-account=a]'),bo=page.locator('[data-team-host][data-account=b]');await expect(ada.locator('[data-host-selected]')).toBeChecked();await bo.locator('[data-host-selected]').check();await ada.locator('[data-host-name]').fill('Ada');await bo.locator('[data-host-name]').fill('Bo');await bo.locator('[data-host-schedule]').selectOption('work');await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.writes[0].meetingTypes[0].teamScheduling).toMatchObject({mode:'any',hosts:[{name:'Ada',accountId:'a'},{name:'Bo',accountId:'b',scheduleId:'work'}]});
- for(const [label,mode] of [['Guest chooses a host','choose'],['All selected hosts','all']]){await page.getByRole('radio',{name:label,exact:true}).check();await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.settings.meetingTypes[0].teamScheduling.mode).toBe(mode);}
+test('each team link configures any, guest choice or everyone with explicit host calendars',async({page})=>{
+ const state=await fixture(page);await page.goto(base+'/studio#link=intro');await page.locator('#meeting-form').waitFor();
+ await expect(page.locator('#meeting-form').getByRole('heading',{name:'Hosts'})).toBeVisible();
+ await expect(page.getByRole('radio',{name:'One host',exact:true})).toBeChecked();await page.getByRole('radio',{name:'Any available host',exact:true}).check();
+ const ada=page.locator('[data-team-host][data-account=a]'),bo=page.locator('[data-team-host][data-account=b]');await expect(ada.locator('[data-host-selected]')).toBeChecked();await bo.locator('[data-host-selected]').check();await ada.locator('[data-host-name]').fill('Ada');await bo.locator('[data-host-name]').fill('Bo');
+ // Hours come from each host's availability; there is no per-host hours choice.
+ await expect(page.locator('#meeting-form select[data-host-schedule]')).toHaveCount(0);await expect(page.locator('[data-host-own-hours]')).toHaveCount(0);
+ await expect(bo.getByLabel('Booking calendar for bo@company.test')).toHaveValue('__default__');
+ await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ expect(state.writes[0].meetingTypes[0].teamScheduling).toMatchObject({mode:'any',hosts:[{name:'Ada',accountId:'a',useDefaultCalendar:true,conflictCalendarIds:null,scheduleId:null},{name:'Bo',accountId:'b',useDefaultCalendar:true,conflictCalendarIds:null,scheduleId:null}]});
+ for(const [label,mode] of [['Guest chooses a host','choose'],['All selected hosts','all']]){await page.getByRole('radio',{name:label,exact:true}).check();await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.settings.meetingTypes[0].teamScheduling.mode).toBe(mode);}
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/team-hosts-mobile.png`,fullPage:true,animations:'disabled'});
+});
+
+test('a host with different times on a link keeps them until Reset',async({page})=>{
+ const state=await fixture(page,{team:{mode:'any',hosts:[hosts[0],{...hosts[1],scheduleId:'work'}]}});await page.goto(base+'/studio#link=intro');await page.locator('#meeting-form').waitFor();
+ const bo=page.locator('[data-team-host][data-account=b]'),note=bo.locator('[data-host-own-hours]');
+ await expect(note).toHaveText('Bo has different times on this link · Reset');await expect(page.locator('[data-team-host][data-account=a] [data-host-own-hours]')).toHaveCount(0);
+ await page.getByLabel('Meeting name',{exact:true}).fill('Intro call');await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ expect(state.writes[0].meetingTypes[0].teamScheduling.hosts.map(h=>[h.id,h.scheduleId])).toEqual([['ada',null],['bo','work']]);
+ await expect(page.locator('[data-team-host][data-account=b] [data-host-own-hours]')).toHaveCount(1);
+ await page.locator('[data-team-host][data-account=b]').getByRole('button',{name:'Reset',exact:true}).click();
+ await expect(page.locator('[data-host-own-hours]')).toHaveCount(0);await expect(page.locator('#editor-save-state')).toHaveText('Unsaved changes');
+ await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ expect(state.writes[1].meetingTypes[0].teamScheduling.hosts.map(h=>[h.id,h.scheduleId])).toEqual([['ada',null],['bo',null]]);
 });
 
 test('guest selects a host, sees only that host times and submits only public host identity',async({page})=>{
@@ -35,12 +59,8 @@ test('collective guests see everyone attending without a host selector',async({p
  await fixture(page,{guest:true,team:{mode:'all',hosts}});await page.goto(base+`/b/${hostId}/intro`);await expect(page.locator('.host-intro')).toContainText('With Ada, Bo');await expect(page.locator('#guest-team-host')).toHaveCount(0);await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/team-guest-mobile.png`,fullPage:true,animations:'disabled'});
 });
 
-test('Availability is directly editable and saving through the navigation guard applies hours to selected links',async({page})=>{
- const state=await fixture(page);await page.goto(base+'/studio');await page.getByRole('button',{name:'Availability',exact:true}).click();await expect(page.getByRole('heading',{name:'Weekly hours',exact:true})).toBeVisible();await page.getByRole('button',{name:'Exact hours',exact:true}).click();await page.getByLabel('Monday end 1',{exact:true}).fill('15:00');await page.getByLabel('Default for new links',{exact:true}).check();await page.getByLabel('Intro',{exact:true}).check();await page.getByRole('button',{name:'Calendars',exact:true}).click();let dialog=page.getByRole('dialog',{name:'Unsaved changes',exact:true});await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'Keep editing',exact:true}).click();await expect(page.getByLabel('Monday end 1',{exact:true})).toHaveValue('15:00');await page.getByRole('button',{name:'Calendars',exact:true}).click();await dialog.getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByRole('heading',{name:'Calendars',exact:true})).toBeVisible();expect(state.settings.availabilitySchedules[0].weeklyHours[1][0].end).toBe(900);expect(state.settings.defaultAvailabilityScheduleId).toBe('work');expect(state.settings.meetingTypes[0].useDefaultSchedule).toBe(true);await page.getByRole('button',{name:'Availability',exact:true}).click();await page.getByRole('button',{name:'Exact hours',exact:true}).click();await expect(page.getByLabel('Monday end 1',{exact:true})).toHaveValue('15:00');await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await expect(page.getByLabel('Default for new links',{exact:true})).toBeVisible();await page.getByLabel('Default for new links',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/availability-integrated-mobile.png`,fullPage:true,animations:'disabled'});
-});
-
 test('a team link can publish through its selected host when the hidden legacy account has no destination',async({page})=>{
- const state=await fixture(page);state.settings.accounts[0].destinationCalendarId='';await page.goto(base+'/studio#link=intro');await page.getByRole('tab',{name:'Hosts',exact:true}).click();await page.getByRole('radio',{name:'Any available host',exact:true}).check();await page.locator('[data-account=a] [data-host-selected]').uncheck();await page.locator('[data-account=b] [data-host-selected]').check();await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.settings.meetingTypes[0]).toMatchObject({accountId:'b',calendarId:b.destinationCalendarId,teamScheduling:{mode:'any'}});
+ const state=await fixture(page);state.settings.accounts[0].destinationCalendarId='';await page.goto(base+'/studio#link=intro');await page.locator('#meeting-form').waitFor();await page.getByRole('radio',{name:'Any available host',exact:true}).check();await page.locator('[data-account=a] [data-host-selected]').uncheck();await page.locator('[data-account=b] [data-host-selected]').check();await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.settings.meetingTypes[0]).toMatchObject({accountId:'b',calendarId:b.destinationCalendarId,teamScheduling:{mode:'any'}});
 });
 
 test('changed team policy is explained and requires a fresh host choice without losing guest details',async({page})=>{

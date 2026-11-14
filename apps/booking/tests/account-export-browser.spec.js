@@ -105,10 +105,10 @@ test('switching profile mid-export ignores the late page',async({page})=>{
  expect(exportRequests(state).map(r=>r.ws)).toEqual([company]);
 });
 
-test('390 px: Manage account fits and export is usable by keyboard',async({page,browserName})=>{
+test('390 px: More opens Manage account, which fits, and export is usable by keyboard',async({page,browserName})=>{
  await page.setViewportSize({width:390,height:844});await mock(page,{exports:{account:{json:page1('account',[{name:'a',data:[]}],null)}}});await page.goto(base+'/studio');
- const trigger=page.locator('#account-trigger');await expect(trigger).toBeVisible();
- await trigger.focus();await page.keyboard.press('ArrowDown');for(let i=0;i<8&&!await page.getByRole('button',{name:'Manage account',exact:true}).evaluate(e=>e===document.activeElement);i++)await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');
+ await expect(page.locator('#account-trigger')).toBeHidden();const trigger=page.locator('[data-more]');await expect(trigger).toBeVisible();
+ await trigger.focus();await page.keyboard.press('Enter');for(let i=0;i<8&&!await page.getByRole('button',{name:'Manage account',exact:true}).evaluate(e=>e===document.activeElement);i++)await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');
  const dialog=page.getByRole('dialog',{name:'Account',exact:true});await expect(dialog).toBeVisible();const box=await dialog.boundingBox();expect(box.x).toBeGreaterThanOrEqual(0);expect(box.x+box.width).toBeLessThanOrEqual(390);
  await page.keyboard.press(browserName==='webkit'?'Alt+Tab':'Tab');await expect(dialog.getByRole('button',{name:'Export your data',exact:true})).toBeFocused();await page.keyboard.press('Enter');
  const link=dialog.getByRole('link',{name:'Download',exact:true});await expect(link).toBeFocused();expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(44);

@@ -37,7 +37,7 @@ test('fixed link shows no chooser and explicitly books its displayed duration',a
 
 test('guest length change loads actual times, hides old-length times while loading and books the chosen length',async({page})=>{
  const state=await fixture(page,{type:{durationOptions:[30,60]},delays:{60:500}});await page.goto(base+`/b/${hostId}/intro`);
- const thirty=page.getByRole('radio',{name:'30 min',exact:true}),hour=page.getByRole('radio',{name:'1 hr',exact:true});
+ const thirty=page.getByRole('radio',{name:'30 min',exact:true}),hour=page.getByRole('radio',{name:'60 min',exact:true});
  await expect(thirty).toBeChecked();await expect(lengths(page)).toHaveCount(3);
  await hour.check();await expect(hour).toBeFocused();await expect(page.locator('.booking')).toHaveAttribute('aria-busy','true');await expect(lengths(page)).toHaveCount(0);await expect(page.locator('.time-loading')).toBeVisible();
  await expect(page.locator('.booking')).toHaveAttribute('aria-busy','false');await expect(lengths(page)).toHaveCount(3);await expect(hour).toBeFocused();expect(state.availability).toEqual([null,'60']);
@@ -48,23 +48,23 @@ test('guest length change loads actual times, hides old-length times while loadi
 
 test('delayed earlier length reply cannot replace the newer choice; going back restores instantly',async({page})=>{
  const state=await fixture(page,{type:{duration:30,durationOptions:[15,30,60]},delays:{60:800}});await page.goto(base+`/b/${hostId}/intro`);
- await page.getByRole('radio',{name:'1 hr',exact:true}).check();await page.getByRole('radio',{name:'15 min',exact:true}).check();
+ await page.getByRole('radio',{name:'60 min',exact:true}).check();await page.getByRole('radio',{name:'15 min',exact:true}).check();
  await expect(page.getByRole('radio',{name:'15 min',exact:true})).toBeChecked();await expect(lengths(page)).toHaveCount(3);
  await page.waitForTimeout(1000);await expect(page.getByRole('radio',{name:'15 min',exact:true})).toBeChecked();await expect(lengths(page).first()).toHaveText(/^0?9:00$/);await expect(lengths(page).nth(1)).toHaveText(/^0?9:15$/);
- await page.getByRole('radio',{name:'1 hr',exact:true}).check();await page.getByRole('radio',{name:'15 min',exact:true}).check();await expect(lengths(page).nth(1)).toHaveText(/^0?9:15$/);
+ await page.getByRole('radio',{name:'60 min',exact:true}).check();await page.getByRole('radio',{name:'15 min',exact:true}).check();await expect(lengths(page).nth(1)).toHaveText(/^0?9:15$/);
  expect(state.availability.filter(v=>v==='15')).toHaveLength(1);
 });
 
 test('failed length load keeps the previous length and its times with an actionable error',async({page})=>{
  await fixture(page,{type:{durationOptions:[30,60]},fail:[60]});await page.goto(base+`/b/${hostId}/intro`);
- await page.getByRole('radio',{name:'1 hr',exact:true}).click();
- await expect(page.locator('#availability-error')).toHaveText('Times for 1 hr could not load. Try again.');await expect(page.getByRole('radio',{name:'30 min',exact:true})).toBeChecked();await expect(lengths(page).nth(1)).toHaveText(/^0?9:30$/);
+ await page.getByRole('radio',{name:'60 min',exact:true}).click();
+ await expect(page.locator('#availability-error')).toHaveText('Times for 60 min could not load. Try again.');await expect(page.getByRole('radio',{name:'30 min',exact:true})).toBeChecked();await expect(lengths(page).nth(1)).toHaveText(/^0?9:30$/);
 });
 
 test('host choice and intake draft survive a length change',async({page})=>{
  await fixture(page,{type:{durationOptions:[30,60],questions:[{id:'topic',type:'text',label:'Topic',required:false}]}});await page.goto(base+`/b/${hostId}/intro`);
  await lengths(page).first().click();await page.getByLabel('Your name',{exact:true}).fill('Keep me');await page.getByLabel(/Topic/).fill('Roadmap');await page.getByRole('button',{name:'← Choose another time'}).click();
- await page.getByRole('radio',{name:'1 hr',exact:true}).check();await expect(lengths(page)).toHaveCount(3);await lengths(page).first().click();
+ await page.getByRole('radio',{name:'60 min',exact:true}).check();await expect(lengths(page)).toHaveCount(3);await lengths(page).first().click();
  await expect(page.getByLabel('Your name',{exact:true})).toHaveValue('Keep me');await expect(page.getByLabel(/Topic/)).toHaveValue('Roadmap');
 });
 
@@ -86,16 +86,17 @@ test('phone width and reduced motion keep the chooser usable',async({page})=>{
 
 test('host sets a custom default and up to four guest lengths; one length stays fixed',async({page})=>{
  const state=await fixture(page,{guest:false});await page.goto(base+'/studio#link=intro');
- const duration=page.getByLabel('Duration',{exact:true});await duration.fill('37');await expect(page.getByRole('checkbox',{name:'37 min (default)'})).toBeChecked();await expect(page.getByRole('checkbox',{name:'37 min (default)'})).toBeDisabled();
- await page.getByRole('checkbox',{name:'1 hr',exact:true}).check();await page.getByLabel('Other length in minutes').fill('95');await page.getByRole('button',{name:'Add',exact:true}).click();
- await expect(page.getByRole('checkbox',{name:'1 hr 35 min',exact:true})).toBeChecked();await page.getByRole('checkbox',{name:'15 min',exact:true}).check();
- await expect(page.getByRole('checkbox',{name:'45 min',exact:true})).toBeDisabled();await expect(page.locator('[data-duration-error]')).toHaveText('Up to four lengths.');
- await page.getByLabel('Other length in minutes').fill('120');await page.getByRole('button',{name:'Add',exact:true}).click();await expect(page.locator('[data-duration-error]')).toHaveText('Up to four lengths. Remove one first.');
- await expect(page.locator('#editor-save-state')).toHaveText('Unsaved changes');await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ const form=page.locator('#meeting-form'),duration=form.locator('input[name=duration]'),chip=name=>form.getByRole('checkbox',{name,exact:true}),other=async value=>{await form.getByRole('button',{name:'Other length',exact:true}).click();const minutes=form.getByLabel('Minutes',{exact:true});await expect(minutes).toBeFocused();await minutes.fill(value);await minutes.press('Enter');};
+ await expect(chip('30 min')).toBeChecked();await expect(duration).toHaveValue('30');await expect(form.locator('[data-len-note]')).toHaveText('');
+ await other('37');await expect(chip('37 min')).toBeChecked();await expect(form.locator('[data-len-note]')).toHaveText('Guests choose');await chip('30 min').uncheck();await expect(duration).toHaveValue('37');await expect(form.locator('[data-len-note]')).toHaveText('');
+ await chip('60 min').check();await other('95');await expect(chip('95 min')).toBeChecked();await chip('15 min').check();
+ for(const name of ['30 min','45 min','90 min'])await expect(chip(name)).toBeDisabled();
+ await other('120');await expect(chip('120 min')).not.toBeChecked();await expect(chip('120 min')).toBeDisabled();await expect(form.locator('input[name=durationOption]:checked')).toHaveCount(4);
+ await expect(page.locator('#editor-save-state')).toHaveText('Unsaved changes');await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
  expect(state.writes[0].meetingTypes[0]).toMatchObject({duration:37,durationOptions:[15,37,60,95]});
- for(const name of ['15 min','1 hr','1 hr 35 min'])await page.getByRole('checkbox',{name,exact:true}).uncheck();await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
- expect(state.writes[1].meetingTypes[0]).toMatchObject({duration:37,durationOptions:null});
- await duration.fill('3');await expect(duration).toHaveAttribute('aria-invalid','true');await page.getByRole('button',{name:/Save changes/}).click();expect(state.writes).toHaveLength(2);
+ for(const name of ['15 min','60 min','95 min'])await chip(name).click();await expect(form.locator('input[name=durationOption]:checked')).toHaveCount(1);await chip('37 min').click();await expect(chip('37 min')).toBeChecked();await expect(duration).toHaveValue('37');
+ await other('3');await expect(chip('3 min')).toHaveCount(0);await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ expect(state.writes[1].meetingTypes[0]).toMatchObject({duration:37,durationOptions:null});expect(state.writes).toHaveLength(2);
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/duration-host-phone.png`,fullPage:true,animations:'disabled'});
 });
 
@@ -105,7 +106,7 @@ test('owner preview length change uses local draft preview only and keeps guest 
  await page.goto(base+'/__duration-test');await page.waitForFunction(()=>!!window.open1);await page.evaluate(()=>window.open1());
  const frame=page.frameLocator('iframe');await expect(frame.locator('.slot')).toHaveCount(2);
  await frame.locator('.slot').first().click();await frame.getByLabel('Your name',{exact:true}).fill('Draft guest');await frame.getByRole('button',{name:'← Choose another time'}).click();
- await frame.getByRole('radio',{name:'1 hr',exact:true}).check();await expect(frame.locator('.slot')).toHaveCount(0);await expect(frame.locator('.slot').nth(1)).toHaveText('10:00');
+ await frame.getByRole('radio',{name:'60 min',exact:true}).check();await expect(frame.locator('.slot')).toHaveCount(0);await expect(frame.locator('.slot').nth(1)).toHaveText('10:00');
  await frame.locator('.slot').first().click();await expect(frame.getByLabel('Your name',{exact:true})).toHaveValue('Draft guest');await expect(frame.getByRole('button',{name:'Preview',exact:true})).toBeDisabled();
  expect(await page.evaluate(()=>window.calls)).toEqual([null,60]);expect(requests).toEqual([]);
  // A frame asking for a length outside the projected choices gets an error reply, not a preview load.
@@ -115,7 +116,7 @@ test('owner preview length change uses local draft preview only and keeps guest 
  await frame.getByRole('radio',{name:'30 min',exact:true}).check();await page.keyboard.press('Escape');await expect(page.locator('dialog')).toHaveCount(0);await expect(page.locator('#trigger')).toBeFocused();expect(requests).toEqual([]);
 });
 
-test('unapplied Other value does not block meeting save or dirty-navigation save',async({page})=>{const state=await fixture(page,{guest:false});await page.goto(base+'/studio#link=intro');await page.getByLabel('Other length in minutes').fill('999');await page.getByLabel('Meeting name',{exact:true}).fill('Changed title');await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.writes[0].meetingTypes[0]).toMatchObject({duration:30,durationOptions:null,title:'Changed title'});await page.getByLabel('Other length in minutes').fill('2.5');await page.getByLabel('Meeting name',{exact:true}).fill('Changed again');await page.getByRole('button',{name:'Bookings',exact:true}).click();await page.getByRole('dialog',{name:'Unsaved changes'}).getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByRole('heading',{name:'Bookings',exact:true})).toBeVisible();expect(state.writes[1].meetingTypes[0].title).toBe('Changed again');});
+test('unapplied Other value does not block meeting save or dirty-navigation save',async({page})=>{const state=await fixture(page,{guest:false});await page.goto(base+'/studio#link=intro');const form=page.locator('#meeting-form'),other=()=>form.getByRole('button',{name:'Other length',exact:true}).click();await other();await form.getByLabel('Minutes',{exact:true}).fill('999');await page.getByLabel('Meeting name',{exact:true}).fill('Changed title');await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.writes[0].meetingTypes[0]).toMatchObject({duration:30,durationOptions:null,title:'Changed title'});await other();await form.getByLabel('Minutes',{exact:true}).fill('2.5');await page.getByLabel('Meeting name',{exact:true}).fill('Changed again');await page.getByRole('navigation',{name:'Scheduling'}).getByRole('button',{name:/^Bookings/}).click();await page.getByRole('dialog',{name:'Unsaved changes'}).getByRole('button',{name:'Save changes',exact:true}).click();await expect(page.getByRole('heading',{name:'Bookings',exact:true})).toBeVisible();expect(state.writes[1].meetingTypes[0]).toMatchObject({duration:30,durationOptions:null,title:'Changed again'});});
 
 test('uncertain fixed-length booking outcome retains original duration and idempotency key',async({page})=>{const state=await fixture(page);let changed=false;const submitted=[];await page.route('**/api/public/*/intro/availability',r=>r.fulfill({json:{config:{...DEFAULT,duration:changed?45:30,durationOptions:null},slots:slotsFor(changed?45:30)}}));await page.route('**/api/public/*/intro/book',r=>{submitted.push(r.request().postDataJSON());changed=true;return r.fulfill({status:503,json:{error:'Temporary failure'}});});await page.goto(base+`/b/${hostId}/intro`);await lengths(page).first().click();await page.getByLabel('Your name',{exact:true}).fill('Guest');await page.getByLabel('Email address',{exact:true}).fill('g@example.com');await page.getByRole('button',{name:'Confirm booking',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Temporary failure');await expect(page.locator('.meeting-meta')).toContainText('30 minutes');await page.getByRole('button',{name:'Confirm booking',exact:true}).click();await expect.poll(()=>submitted.length).toBe(2);expect(submitted[0].duration).toBe(30);expect(submitted[1].duration).toBe(30);expect(submitted[1].idempotencyKey).toBe(submitted[0].idempotencyKey);});
 test('duration and intake change together reconcile incompatible answers after a rejected admission',async({page})=>{

@@ -16,12 +16,12 @@ test('a stored company is used only for the same account and only when still lis
 });
 test('capabilities come from the latest listing, not the stored record',()=>{
   const r=resolveWorkspaces({...listing,workspaces:[listing.workspaces[0],{id:'h_acme',name:'Acme',role:'viewer',capabilities:caps('viewer')}]},{account:'h_me',stored:{account:'h_me',id:'h_acme',role:'owner'}});
-  assert.equal(r.active.role,'viewer');assert.equal(can(r.active,'manageSettings'),false);assert.deepEqual(sectionsFor(r.active),['Bookings','Analytics','Team']);
+  assert.equal(r.active.role,'viewer');assert.equal(can(r.active,'manageSettings'),false);assert.deepEqual(sectionsFor(r.active),['Bookings','Team','Analytics']);
 });
 test('section and member permissions follow the workspace matrix',()=>{
   const ws=role=>({id:'h_x',name:'X',role,personal:false,capabilities:caps(role)});
   assert.ok(sectionsFor({personal:true}).includes('Integrations'));assert.ok(!sectionsFor({personal:true}).includes('Team'));
-  assert.ok(sectionsFor(ws('admin')).includes('Integrations'));assert.deepEqual(sectionsFor(ws('member')),['Bookings','Analytics','Team']);
+  assert.ok(sectionsFor(ws('admin')).includes('Integrations'));assert.deepEqual(sectionsFor(ws('member')),['Bookings','Team','Analytics']);
   assert.equal(can(ws('member'),'approveBookings'),true);assert.equal(can(ws('viewer'),'approveBookings'),false);
   assert.deepEqual(inviteRoles(ws('admin')),['member','viewer']);assert.deepEqual(inviteRoles(ws('owner')),['admin','member','viewer']);
   const me='me@example.com';

@@ -14,8 +14,8 @@ function form(duration,checked=[],{editor=true}={}){
  return {elements:{duration:{value:String(duration)}},querySelector:selector=>selector==='[data-duration-editor]'&&editor?editorNode:null};
 }
 
-test('labels are compact and exact for custom lengths',()=>{
- assert.equal(durationLabel(5),'5 min');assert.equal(durationLabel(60),'1 hr');assert.equal(durationLabel(95),'1 hr 35 min');assert.equal(durationLabel(480),'8 hr');
+test('labels use minutes everywhere, so lengths read the same in every place',()=>{
+ assert.equal(durationLabel(5),'5 min');assert.equal(durationLabel(60),'60 min');assert.equal(durationLabel(95),'95 min');assert.equal(durationLabel(480),'480 min');
 });
 
 test('guest lengths never throw and keep the shared contract order',()=>{
@@ -23,7 +23,7 @@ test('guest lengths never throw and keep the shared contract order',()=>{
  assert.deepEqual(guestDurations({duration:30,durationOptions:[60,30,17]}),[60,30,17]);
  assert.deepEqual(guestDurations({duration:30,durationOptions:[60,45]}),[30],'default must be present, otherwise fixed');
  assert.deepEqual(guestDurations({duration:3}),[]);
- assert.equal(durationSummary({duration:30,durationOptions:[60,30,15]}),'15 min · 30 min · 1 hr');
+ assert.equal(durationSummary({duration:30,durationOptions:[60,30,15]}),'15, 30 or 60 min');
  assert.equal(durationSummary({duration:30,durationOptions:null}),'30 min');
 });
 
