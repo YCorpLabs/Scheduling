@@ -99,6 +99,31 @@ export async function listCalendars(accessToken, options = {}) {
   }
   throw new GoogleError(502, 'pagination_limit');
 }
+/**
+ * Events on one calendar between timeMin and timeMax, for the host's own
+ * Availability view. Only start, end, title and whether it is one of our
+ * bookings leave this function; descriptions, attendees and links never do.
+ */
+export async function listEvents(accessToken, { calendarId, timeMin, timeMax }, options = {}) {
+  if (typeof calendarId !== 'string' || !calendarId || calendarId.length > 1024) throw new GoogleError(400, 'invalid_calendars');
+  const items = []; let pageToken;
+  for (let page = 0; page < 4; page++) {
+    const query = new URLSearchParams({ timeMin, timeMax, singleEvents: 'true', orderBy: 'startTime', maxResults: '250', fields: 'nextPageToken,items(id,status,summary,transparency,start,end,extendedProperties/private/emailBooking)' });
+    if (pageToken) query.set('pageToken', pageToken);
+    const result = await googleRequest(accessToken, `/calendars/${encodeURIComponent(calendarId)}/events?${query}`, options);
+    if (!Array.isArray(result?.items ?? [])) throw new GoogleError(502, 'invalid_response');
+    for (const event of result.items ?? []) {
+      if (event?.status === 'cancelled' || event?.transparency === 'transparent') continue;
+      const allDay = !event?.start?.dateTime;
+      const start = Date.parse(event?.start?.dateTime ?? event?.start?.date), end = Date.parse(event?.end?.dateTime ?? event?.end?.date);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+      items.push({ start, end, allDay, ...(allDay ? { startDate: event.start.date, endDate: event.end.date } : {}), title: typeof event.summary === 'string' ? event.summary.slice(0, 120) : '', booking: typeof event.extendedProperties?.private?.emailBooking === 'string' });
+    }
+    if (!result.nextPageToken) return items;
+    pageToken = result.nextPageToken;
+  }
+  return items;
+}
 export async function freeBusy(accessToken, { calendarIds, timeMin, timeMax, timeZone }, options = {}) {
   if (!Array.isArray(calendarIds) || !calendarIds.length || calendarIds.length > 50 || calendarIds.some(id => typeof id !== 'string' || !id)) throw new GoogleError(400, 'invalid_calendars');
   const result = await googleRequest(accessToken, '/freeBusy', { ...options, method: 'POST', body: { timeMin, timeMax, ...(timeZone ? { timeZone } : {}), calendarExpansionMax: 50, items: [...new Set(calendarIds)].map(id => ({ id })) } });

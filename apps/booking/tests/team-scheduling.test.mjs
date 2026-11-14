@@ -55,10 +55,11 @@ test('fresh admission fails closed when authorization or policy changes while Go
 test('duplicate host identities and deleting a referenced schedule fail closed',async()=>{
  const f=await setup(),b=f.ledger.account('b');b.email='A@company.test';f.ledger.putAccount(b);await assert.rejects(()=>f.save(f.type),/distinct connected/);
 });
-test('host saved hours are enforced and schedule removal or in-place edits cannot bypass admission',async()=>{
+test('migrated per-host hours are enforced and removal or in-place edits cannot bypass admission',async()=>{
  const f=await setup(),at=start(),day=new Date(at).getUTCDay(),schedules=[{id:'hours',name:'Hours',zone:'UTC',weeklyHours:Object.fromEntries(Array.from({length:7},(_,day)=>[day,[{start:0,end:1440}]])),dateOverrides:{}}];
- f.ledger.saveSettings({availabilitySchedules:schedules});const type=f.ledger.settings().meetingTypes[0];type.teamScheduling.hosts.forEach(h=>h.scheduleId='hours');await f.save(type);assert.throws(()=>f.ledger.saveSettings({availabilitySchedules:[]}),/schedule is missing/);
- let entered,release;const reached=new Promise(r=>entered=r),gate=new Promise(r=>release=r),read=f.google.freeBusy;f.google.freeBusy=async(...args)=>{entered();await gate;return read(...args);};const booking=f.book({start:at});await reached;const changed=f.ledger.meta('availabilitySchedules');changed[0].weeklyHours[day]=[];f.ledger.putMeta('availabilitySchedules',changed);release();assert.equal((await booking).status,409);assert.equal(f.events.size,0);
+ // Per-host hours only exist on migrated workspaces, so seed that state directly.
+ const kept=f.ledger.meta('availabilitySchedules')??[];f.ledger.putMeta('availabilitySchedules',[...kept,...schedules]);const type=f.ledger.settings().meetingTypes[0];type.teamScheduling.hosts.forEach(h=>h.scheduleId='hours');f.ledger.putMeta('meetingTypes',[type]);assert.throws(()=>f.ledger.saveSettings({availabilitySchedules:kept}),/schedule is missing/);
+ let entered,release;const reached=new Promise(r=>entered=r),gate=new Promise(r=>release=r),read=f.google.freeBusy;f.google.freeBusy=async(...args)=>{entered();await gate;return read(...args);};const booking=f.book({start:at});await reached;const changed=f.ledger.meta('availabilitySchedules');changed.find(x=>x.id==='hours').weeklyHours[day]=[];f.ledger.putMeta('availabilitySchedules',changed);release();assert.equal((await booking).status,409);assert.equal(f.events.size,0);
 });
 test('same primary identity under another grant and canonical calendar IDs share a local resource',()=>{
  assert.ok(hostsShareResource({accountId:'a',calendarId:'primary',email:'person@company.test'},{accountId:'b',calendarId:'person@company.test',email:'other@company.test'}));assert.ok(!hostsShareResource({accountId:'a',calendarId:'primary',email:'a@company.test'},{accountId:'b',calendarId:'primary',email:'b@company.test'}));

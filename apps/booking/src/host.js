@@ -47,6 +47,8 @@ export class LiveBookingHost extends DurableObject {
   previewSettings(patch){return this.#active(async()=>{try{return await this.hostedSettings.preview(patch);}catch(error){return settingsError(error);}});}
   applySettings(patch,expectedRevision){return this.#active(async()=>{try{return await this.hostedSettings.apply(patch,expectedRevision);}catch(error){return settingsError(error);}});}
   listCalendars(){return this.#active(async()=>{return this.ledger.listCalendars();});}
+  calendarEvents(range){return this.#active(async()=>this.ledger.calendarEvents(range));}
+  ownCalendarEvents(member,range){return this.#active(async()=>this.ledger.ownCalendarEvents(member,range));}
   configureCalendars(data){return this.#active(async()=>{return this.ledger.configureCalendars(data);});}
   rescheduleAvailability(id,token,range,authority){return this.#active(async()=>{return this.ledger.rescheduleAvailability(id,token,range,authority);});}
   availability(slug,range){return this.#active(async()=>{return this.ledger.availability(slug,range);});}

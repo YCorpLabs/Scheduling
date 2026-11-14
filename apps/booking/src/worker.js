@@ -117,9 +117,10 @@ export default {
           if(path.endsWith('/withdraw')&&request.method==='POST'){sameOrigin(request,env);await limit(request,env,'decision');const data=await readJson(request);if(Object.keys(data).some(k=>!['workspaceId','accountId'].includes(k))||!hostPattern.test(data.workspaceId??'')||typeof data.accountId!=='string'||data.accountId.length>1024)throw new HttpError(400,'Choose your calendar contribution.');return result(await env.LIVE_HOSTS.getByName(data.workspaceId).withdrawMemberCalendar({id:user.hostId,email:identity.email},data.accountId));}
           throw new HttpError(405,'Choose a contribution action.');
         }
-        if(path==='/api/live/my-calendar'||path==='/api/live/my-calendar/disconnect'||path==='/api/live/my-calendar/readiness'){
+        if(path==='/api/live/my-calendar'||path==='/api/live/my-calendar/disconnect'||path==='/api/live/my-calendar/readiness'||path==='/api/live/my-calendar/events'){
           const user=await session(request,env);if(!user)throw new HttpError(401,'Sign in to continue.');const member=await ownCalendarMember(env,user,request.headers.get('X-Scheduling-Workspace')),host=env.LIVE_HOSTS.getByName(member.workspaceId);
           if(path==='/api/live/my-calendar/readiness'&&request.method==='GET')return result(await host.ownCalendarReadiness(member));
+          if(path==='/api/live/my-calendar/events'){if(request.method!=='GET')throw new HttpError(405,'Choose a week to show.');return result(await host.ownCalendarEvents(member,{from:url.searchParams.get('from'),to:url.searchParams.get('to')}));}
           if(path==='/api/live/my-calendar'&&request.method==='GET')return result(await host.ownCalendar(member));
           if(request.method==='POST'&&path!=='/api/live/my-calendar/readiness'){sameOrigin(request,env);await limit(request,env,'decision');const data=await readJson(request,32000);return result(path.endsWith('/disconnect')?await host.disconnectOwnCalendar(member,data):await host.configureOwnCalendar(member,data));}
           throw new HttpError(405,'Choose your calendar settings.');
@@ -139,6 +140,7 @@ export default {
           if(path==='/api/live/settings'){const settings=await host.settingsWithRevision();return settings.error?result(settings):response(projectWorkspaceSettings(settings,access));}
           if(path==='/api/live/member-calendars')return result(await host.memberCalendarReadiness());
           if(path==='/api/live/calendars')return result(await host.listCalendars());
+          if(path==='/api/live/calendar-events')return result(await host.calendarEvents({from:url.searchParams.get('from'),to:url.searchParams.get('to')}));
           if(path==='/api/live/integrations')return result(await host.integrationStatus());
           if(path==='/api/live/availability')return result(await host.availability(url.searchParams.get('type')||'intro',{preview:true,duration:requestedDuration(url)}));
           if(path==='/api/live/analytics')return result(await host.analytics());

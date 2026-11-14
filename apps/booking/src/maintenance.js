@@ -17,7 +17,7 @@ export const MAINTENANCE_MESSAGE='Scheduling is paused for maintenance. Please t
 const FENCE_TTL=10*365*86400000;
 // Provider functions that never change calendar state. Anything else, including
 // functions added later, is blocked while frozen.
-const CALENDAR_READS=new Set(['refreshTokens','listCalendars','freeBusy','getEvent','conferenceDetails','assertManagedEvent']);
+const CALENDAR_READS=new Set(['refreshTokens','listCalendars','listEvents','freeBusy','getEvent','conferenceDetails','assertManagedEvent']);
 
 export function maintenanceError(kind){return Object.assign(Error(`Outbound ${kind} is paused for maintenance.`),{code:'maintenance_frozen',retryable:true,deliveryUnknown:false});}
 export const maintenanceRefusal=()=>({error:MAINTENANCE_MESSAGE,status:503,code:'maintenance_frozen'});

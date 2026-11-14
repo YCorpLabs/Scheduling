@@ -3,7 +3,7 @@ const {lifecycleSnapshot}=lifecycle;
 import {FENCE_META} from './maintenance.js';
 
 export const HOST_LIFECYCLE_TABLE='live_lifecycle_state';
-const READS=new Set(['refreshTokens','listCalendars','freeBusy','getEvent','conferenceDetails','assertManagedEvent']);
+const READS=new Set(['refreshTokens','listCalendars','listEvents','freeBusy','getEvent','conferenceDetails','assertManagedEvent']);
 const phases=new Set(['fencing','fenced','needs_review']);
 const fail=(message='This booking profile is closed.',status=403,code='lifecycle_fenced')=>Object.assign(Error(message),{status,code});
 const conflict=()=>fail('Deletion state changed. Review it again.',409,'lifecycle_conflict');

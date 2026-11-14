@@ -11,6 +11,7 @@ import { validateConfig, validZone, policySlots, workingWindowChecker, buffersFo
 import { validateIntake, intakeDescription, intakeRevision } from '../public/intake.js';
 import { randomToken, sha256, timingSafeEqual, encryptTokens, decryptTokens } from './crypto.js';
 import * as google from './google.js';
+import { HOURS_MODEL_VERSION, hoursSources, hostLimit, migrateHoursModel, restoreHoursModel, normalizeHoursWrite, workdayHours } from './hours-model.js';
 import { sendNotification, notificationConfigured, prepareNotification } from './notifications.js';
 import { bookingNotificationContent } from './notification-content.js';
 import { operationalStatus, resolveParkedDelivery } from './operations.js';
@@ -105,7 +106,28 @@ export class BookingLedger {
     this.sql.exec('CREATE TABLE IF NOT EXISTS live_metrics (day TEXT NOT NULL, metric TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(day,metric))');
     this.integrations=new IntegrationOutbox(this,dependencies.integrations);
     installExportRevision(this);installLifecycleRevision(this);
+    if(!this.lifecycleFrozen())this.upgradeHoursModel();
+    if(!this.lifecycleFrozen()&&!this.meta('linkAnalyticsStartedAt'))this.putMeta('linkAnalyticsStartedAt',Date.now());
   }
+  workspaceKind(){return this.meta('profile')?.workspaceKind==='company'?'company':'personal';}
+  // One availability per person (hours model v2). Runs once per workspace and
+  // keeps a backup so downgradeHoursModel can put named schedules back.
+  upgradeHoursModel(){
+    if((this.meta('hoursModel')??1)>=HOURS_MODEL_VERSION||!this.meta('meetingTypes'))return false;
+    const {backup,...next}=migrateHoursModel({kind:this.workspaceKind(),availabilitySchedules:this.meta('availabilitySchedules')??[],defaultAvailabilityScheduleId:this.meta('defaultAvailabilityScheduleId')??null,meetingTypes:this.meta('meetingTypes')});
+    this.ctx.storage.transactionSync(()=>{this.putMeta('hoursModelBackup',backup);this.putMeta('availabilitySchedules',next.availabilitySchedules);this.putMeta('defaultAvailabilityScheduleId',next.defaultAvailabilityScheduleId);this.putMeta('meetingTypes',next.meetingTypes);this.putMeta('hoursModel',HOURS_MODEL_VERSION);});
+    return true;
+  }
+  downgradeHoursModel(){
+    const backup=this.meta('hoursModelBackup');if((this.meta('hoursModel')??1)<HOURS_MODEL_VERSION||!backup)return false;
+    const restored=restoreHoursModel({meetingTypes:this.meta('meetingTypes')??[]},backup);
+    this.ctx.storage.transactionSync(()=>{this.putMeta('availabilitySchedules',restored.availabilitySchedules);this.putMeta('defaultAvailabilityScheduleId',restored.defaultAvailabilityScheduleId);this.putMeta('meetingTypes',restored.meetingTypes);this.putMeta('hoursModel',1);this.sql.exec('DELETE FROM live_meta WHERE key=?','hoursModelBackup');});
+    return true;
+  }
+  // First calendar on a personal profile: links without a calendar use it, and
+  // the starter link is switched on so the first-run link works right away.
+  adoptStarterLinks(accountId){const starter=this.meta('starterLinkPending')===true;let changed=false;const types=(this.meta('meetingTypes')??[]).map(t=>{if(t.teamScheduling||t.accountId)return t;changed=true;return {...t,accountId,calendarId:'',useDefaultCalendar:true};}).map(t=>{if(starter&&t.id==='intro'&&t.accountId===accountId&&!t.published){changed=true;return {...t,published:true};}return t;});if(changed)this.putMeta('meetingTypes',types);if(starter)this.sql.exec('DELETE FROM live_meta WHERE key=?','starterLinkPending');}
+  resolveHours(type,schedules=this.meta('availabilitySchedules')??[],defaultId=this.meta('defaultAvailabilityScheduleId')??null){const sources=hoursSources(this.workspaceKind(),schedules,defaultId);return resolveAvailabilitySchedule(type,sources.schedules,sources.defaultId);}
   exportPage(options){return ledgerExportPage(this,options);}
   exportContribution(memberId,accountId){return ledgerExportContribution(this,memberId,accountId);}
   rows(q,...v){return this.sql.exec(q,...v).toArray();}
@@ -129,7 +151,7 @@ export class BookingLedger {
       if(b.status==='confirmed'&&(previous?.status!=='confirmed'||previous.version!==b.version))this.queueFollowUp(b);
       if(previous?.status!==b.status){
         this.queueApprovalNotifications(b,previous);
-        if(b.status==='confirmed'){this.recordMetric('confirmed');this.recordMetric('confirmed:'+(['email','website'].includes(b.source)?b.source:'direct'));}
+        if(b.status==='confirmed'){this.recordMetric('confirmed');this.recordMetric('confirmed:'+(['email','website'].includes(b.source)?b.source:'direct'));if(b.meetingTypeId)this.recordMetric('link-confirmed:'+b.meetingTypeId);}
         if(b.status==='failed')this.recordMetric('failed');
         if(b.status==='cancelled')this.recordMetric(b.replacementConfirmed?'rescheduled':'cancelled');
       }}
@@ -147,25 +169,26 @@ export class BookingLedger {
     this.pruneMetrics(now);
   }
   recordVisit(slug,source='direct'){
-    if(!this.type(slug))return fail('Meeting not found',404);
+    const type=this.type(slug);if(!type)return fail('Meeting not found',404);
     // Attribution accepts opaque tags only: no referrer, URL, IP or visitor ID.
     const tag=['email','website'].includes(source)?source:'direct';
-    this.recordMetric('visit:'+tag);
+    this.recordMetric('visit:'+tag);this.recordMetric('link-visit:'+type.id);
     return {ok:true};
   }
   analytics(){
     const now=Date.now();this.pruneMetrics(now);
     const metrics=['bookingRequests','confirmed','cancelled','rescheduled','failed'];
     const series=Array.from({length:30},(_,i)=>({day:new Date(now-(29-i)*86400000).toISOString().slice(0,10),pageViews:0,...Object.fromEntries(metrics.map(k=>[k,0]))}));
-    const byDay=new Map(series.map(day=>[day.day,day])),sources={direct:0,email:0,website:0},sourceBookings={direct:0,email:0,website:0};
+    const byDay=new Map(series.map(day=>[day.day,day])),sources={direct:0,email:0,website:0},sourceBookings={direct:0,email:0,website:0},links={};
     for(const row of this.rows('SELECT day,metric,count FROM live_metrics WHERE day>=? ORDER BY day',series[0].day)){
       const day=byDay.get(row.day);if(!day)continue;
       if(row.metric.startsWith('visit:')){const source=row.metric.slice(6);if(source in sources){day.pageViews+=row.count;sources[source]+=row.count;}}
       else if(row.metric.startsWith('confirmed:')){const source=row.metric.slice(10);if(Object.hasOwn(sourceBookings,source))sourceBookings[source]+=row.count;}
+      else if(row.metric.startsWith('link-visit:')||row.metric.startsWith('link-confirmed:')){const [kind,id]=[row.metric.slice(0,row.metric.indexOf(':')),row.metric.slice(row.metric.indexOf(':')+1)];links[id]??={views:0,confirmed:0};links[id][kind==='link-visit'?'views':'confirmed']+=row.count;}
       else if(metrics.includes(row.metric))day[row.metric]+=row.count;
     }
     const totals=Object.fromEntries(['pageViews',...metrics].map(key=>[key,series.reduce((sum,day)=>sum+day[key],0)]));
-    return {period:{from:series[0].day,to:series.at(-1).day,timeZone:'UTC',days:30},trackingStartedAt:this.meta('analyticsStartedAt'),totals,sources,sourceBookings,series};
+    return {period:{from:series[0].day,to:series.at(-1).day,timeZone:'UTC',days:30},trackingStartedAt:this.meta('analyticsStartedAt'),linksStartedAt:this.meta('linkAnalyticsStartedAt')??null,totals,sources,sourceBookings,series,links};
   }
   hostId(){return this.meta('profile')?.id;}
   lifecycleFrozen(){return lifecycleBlocked(this);}
@@ -176,7 +199,7 @@ export class BookingLedger {
   maintenanceStore(){return this.fenceStore===undefined?fenceStore(this.env,this.hostId()):this.fenceStore;}
   syncMaintenanceFence(){return syncMaintenanceFence(this,this.maintenanceStore());}
   setMaintenance(data){if(this.lifecycleFrozen())return lifecycleDenial(this);return setMaintenance(this,this.maintenanceStore(),data);}
-  init(profile){if(!profile?.id)throw Error('Invalid profile');const old=this.meta('profile');if(old&&old.id!==profile.id)throw Error('Host mismatch');this.putMeta('profile',old?{...old,...(profile.email?{email:profile.email}:{})}:profile);if(!this.meta('meetingTypes'))this.putMeta('meetingTypes',[{...DEFAULT,host:profile.name??'Your name',company:profile.company??'',title:'Introductory meeting',description:'',id:'intro',slug:'intro',published:false}]);return this.settings();}
+  init(profile){if(!profile?.id)throw Error('Invalid profile');const old=this.meta('profile');if(old&&old.id!==profile.id)throw Error('Host mismatch');this.putMeta('profile',old?{...old,...(profile.email?{email:profile.email}:{})}:profile);if(!this.meta('meetingTypes')){const company=profile.workspaceKind==='company';if(!company&&!(this.meta('availabilitySchedules')??[]).length){this.putMeta('availabilitySchedules',[{id:'availability',name:'Availability',...workdayHours(DEFAULT.zone)}]);this.putMeta('defaultAvailabilityScheduleId','availability');}this.putMeta('meetingTypes',[{...DEFAULT,host:profile.name??'Your name',company:profile.company??'',title:'Introductory meeting',description:'',id:'intro',slug:'intro',published:false,useDefaultSchedule:!company}]);if(!company)this.putMeta('starterLinkPending',true);this.putMeta('hoursModel',HOURS_MODEL_VERSION);}return this.settings();}
   linkUsed(id){return this.meta('singleUse:'+id)===true;}
   linkAdmission(type,id=type?.id){return type?linkAdmissionFailure(type,this.linkUsed(id)):fail('Meeting not found',404);}
   settings(){const types=this.meta('meetingTypes')??[];return {linkAccess:Object.fromEntries(types.map(type=>[type.id,linkAccessState(type,this.linkUsed(type.id))])),profile:this.meta('profile'),accounts:this.accounts().map(({grant,...a})=>a),meetingTypes:this.meta('meetingTypes')??[],availabilitySchedules:this.meta('availabilitySchedules')??[],defaultAvailabilityScheduleId:this.meta('defaultAvailabilityScheduleId')??null};}
@@ -184,19 +207,23 @@ export class BookingLedger {
     this.validateMemberDestinations(patch.meetingTypes??this.meta('meetingTypes')??[]);
     // Validate the complete prospective state before any metadata writes. A
     // schedule cannot disappear underneath a linked (even unpublished) meeting.
-    const schedules=normalizeAvailabilitySchedules(patch.availabilitySchedules!==undefined?patch.availabilitySchedules:this.meta('availabilitySchedules')??[]);
-    const defaultId=normalizeDefaultAvailabilityScheduleId(patch.defaultAvailabilityScheduleId!==undefined?patch.defaultAvailabilityScheduleId:this.meta('defaultAvailabilityScheduleId')??null,schedules);
+    let schedules=normalizeAvailabilitySchedules(patch.availabilitySchedules!==undefined?patch.availabilitySchedules:this.meta('availabilitySchedules')??[]);
+    let defaultId=normalizeDefaultAvailabilityScheduleId(patch.defaultAvailabilityScheduleId!==undefined?patch.defaultAvailabilityScheduleId:this.meta('defaultAvailabilityScheduleId')??null,schedules);
     const previousTypes=this.meta('meetingTypes')??[];let types=previousTypes;
     if(patch.meetingTypes){if(!Array.isArray(patch.meetingTypes)||patch.meetingTypes.length>20)throw Error('Invalid meeting types');const seen=new Set(),ids=new Set();types=patch.meetingTypes.map(t=>{const prior=types.find(type=>type.id===t.id),c=validateConfig({...t,...(prior&&t.useDefaultSchedule===undefined?{useDefaultSchedule:prior.useDefaultSchedule??false}:{}),...Object.fromEntries(['expiresAt','singleUse','cancellationNoticeMinutes','rescheduleNoticeMinutes','durationOptions','teamScheduling','monthlyBookingLimit','yearlyBookingLimit','monthlyBookedMinutesLimit','yearlyBookedMinutesLimit','dailyBookedMinutesLimit','weeklyBookedMinutesLimit','followUpMinutes','followUpSubject','followUpBody'].filter(key=>prior&&t[key]===undefined).map(key=>[key,prior[key]??DEFAULT[key]])),...(prior&&t.requiresApproval===undefined?{requiresApproval:prior.requiresApproval??false}:{}),...(prior&&t.approvalExpiryMinutes===undefined?{approvalExpiryMinutes:prior.approvalExpiryMinutes??1440}:{})}),id=String(t.id??crypto.randomUUID());if(!id||id.length>100||ids.has(id))throw Error('Use unique meeting identifiers');ids.add(id);if(!/^[a-z0-9][a-z0-9-]{0,63}$/.test(t.slug)||seen.has(t.slug))throw Error('Use unique meeting links');seen.add(t.slug);return {...c,id,slug:t.slug,published:!!t.published,...meetingDestination({...t,teamScheduling:c.teamScheduling},this.accounts(),prior)};});}
+    // Older clients (the Email desktop app) may still send named schedules.
+    // Keep stored data in the one-availability shape without changing any hours.
+    let hoursChanged=false;if(patch.availabilitySchedules!==undefined||patch.defaultAvailabilityScheduleId!==undefined||patch.meetingTypes){const next=normalizeHoursWrite({kind:this.workspaceKind(),availabilitySchedules:schedules,defaultAvailabilityScheduleId:defaultId,meetingTypes:types});hoursChanged=JSON.stringify([next.availabilitySchedules,next.defaultAvailabilityScheduleId])!==JSON.stringify([schedules,defaultId]);schedules=next.availabilitySchedules;defaultId=next.defaultAvailabilityScheduleId;if(patch.meetingTypes||JSON.stringify(next.meetingTypes)!==JSON.stringify(types))types=next.meetingTypes;}
     for(const type of types){const prior=(this.meta('meetingTypes')??[]).find(old=>old.id===type.id);if(!type.teamScheduling&&type.useDefaultCalendar===false&&!(prior?.useDefaultCalendar===false&&prior.accountId===type.accountId&&prior.calendarId===type.calendarId)&&!verifiedDestinations.has(destinationKey(type.accountId,type.calendarId)))throw Error('Verify the writable destination calendar before saving.');}
     if(patch.meetingTypes)for(const type of types)for(const host of type.teamScheduling?.hosts??[]){const account=this.account(host.accountId);if(account?.ownerMemberId)continue;if(!type.published&&!account?.connected)continue;const calendarId=host.useDefaultCalendar?account?.destinationCalendarId:host.calendarId;if(!verifiedDestinations.has(destinationKey(host.accountId,calendarId)))throw Error('Verify every team destination calendar before saving.');}
     this.validateConflictCapacity(types);
-    for(const type of types){validateTeamReferences(type.teamScheduling,policyReferenceAccounts(type,this.accounts(),previousTypes.find(t=>t.id===type.id)),schedules,{requireConnected:type.published});resolveAvailabilitySchedule(type,schedules,defaultId);if(patch.meetingTypes&&type.published&&(type.teamScheduling||!this.account(type.accountId)?.ownerMemberId||this.account(type.accountId)?.connected))this.destination(type);}
+    for(const type of types){validateTeamReferences(type.teamScheduling,policyReferenceAccounts(type,this.accounts(),previousTypes.find(t=>t.id===type.id)),schedules,{requireConnected:type.published});this.resolveHours(type,schedules,defaultId);if(patch.meetingTypes&&type.published&&(type.teamScheduling||!this.account(type.accountId)?.ownerMemberId||this.account(type.accountId)?.connected))this.destination(type);}
     const branding={};for(const key of ['avatarImage','bannerImage'])if(patch.profile&&Object.hasOwn(patch.profile,key))branding[key]=validateBrandImage(patch.profile[key],key);
     if(patch.profile){const old=this.meta('profile');this.putMeta('profile',{...old,...branding,name:String(patch.profile.name??old?.name??'').slice(0,160),company:String(patch.profile.company??old?.company??'').slice(0,160)});}
-    if(patch.availabilitySchedules!==undefined)this.putMeta('availabilitySchedules',schedules);
-    if(patch.defaultAvailabilityScheduleId!==undefined)this.putMeta('defaultAvailabilityScheduleId',defaultId);
-    if(patch.meetingTypes){this.putMeta('meetingTypes',types);this.availabilityCache.clear();}
+    if(patch.availabilitySchedules!==undefined||hoursChanged)this.putMeta('availabilitySchedules',schedules);
+    if(patch.defaultAvailabilityScheduleId!==undefined||hoursChanged)this.putMeta('defaultAvailabilityScheduleId',defaultId);
+    if(patch.meetingTypes||types!==previousTypes){this.putMeta('meetingTypes',types);this.availabilityCache.clear();}
+    if(patch.availabilitySchedules!==undefined||hoursChanged)this.availabilityCache.clear();
     return this.settings();}
   memberCalendarEpoch(id){return this.meta('memberCalendarFence:'+id)??0;}
   fenceMemberCalendar(id){if(typeof id!=='string'||!/^h_[A-Za-z0-9_-]{24}$/.test(id))throw Error('Choose a company member.');const epoch=this.memberCalendarEpoch(id)+1;this.putMeta('memberCalendarFence:'+id,epoch);this.availabilityCache.clear();return epoch;}
@@ -227,7 +254,7 @@ export class BookingLedger {
   }
   async ownCalendar(member){
     await this.currentCalendarMember(member);const epoch=this.memberCalendarEpoch(member.id),account=this.ownAccount(member),version=account?.connectionVersion;
-    let calendars=[];if(account?.connected){const {calendars:raw}=await this.accountCalendars(account);calendars=(Array.isArray(raw)?raw:raw?.items??[]).filter(c=>!c.deleted).map(({id,summary,accessRole,primary})=>({id,summary,accessRole,primary:primary===true}));}
+    let calendars=[];if(account?.connected){const {calendars:raw}=await this.accountCalendars(account);calendars=(Array.isArray(raw)?raw:raw?.items??[]).filter(c=>!c.deleted).map(({id,summary,accessRole,primary,backgroundColor})=>({id,summary,accessRole,primary:primary===true,color:/^#[0-9a-f]{6}$/i.test(backgroundColor??'')?backgroundColor:null}));}
     await this.currentCalendarMember(member);if(epoch!==this.memberCalendarEpoch(member.id)||account&&this.account(account.id)?.connectionVersion!==version)throw Object.assign(Error('Your calendar changed. Reload it.'),{status:409});
     const latestAccount=this.ownAccount(member),shape=this.ownCalendarShape(member,latestAccount,calendars),preferenceVersion=latestAccount?.preferenceVersion??0,snapshot=JSON.stringify(this.ownCalendarShape(member,latestAccount)),revision=await sha256(JSON.stringify({shape,epoch,version,preferenceVersion}));
     if(epoch!==this.memberCalendarEpoch(member.id)||account&&this.account(account.id)?.connectionVersion!==version||(this.ownAccount(member)?.preferenceVersion??0)!==preferenceVersion||JSON.stringify(this.ownCalendarShape(member,this.ownAccount(member)))!==snapshot)throw Object.assign(Error('Your calendar changed. Reload it.'),{status:409});
@@ -263,9 +290,9 @@ export class BookingLedger {
   async memberCalendarReadiness(){
     const record=await this.env.AUTH.getByName('workspace:'+this.hostId()).get();await this.refreshMemberEligibility();return {members:(record?.members??[]).map(m=>{const account=this.accounts().find(a=>a.ownerMemberId===m.id&&a.ownerJoinedAt===m.joinedAt&&a.email?.toLowerCase()===m.email?.toLowerCase());return {id:m.id,email:m.email,role:m.role,readiness:m.role==='viewer'?'not_hosting':account?.consentWithdrawn?'withdrawn':!account?'not_connected':!account.connected||account.reconnectRequired||!this.memberAccountAvailable(account)?'reconnect':!account.destinationCalendarId?'choose_calendar':'ready',...(account?{accountId:account.id}:{})};})};
   }
-  memberHoursChecker(account,duration,now=Date.now()){return account?.memberSchedule?workingWindowChecker({...DEFAULT,...account.memberSchedule,notice:0,horizon:60,duration},now):()=>true;}
-  memberHoursAllow(account,start,end){return this.memberHoursChecker(account,(end-start)/MIN)(start,end);}
-  memberHoursSlots(account,slots){if(!slots.length||!account?.memberSchedule)return slots;const contains=this.memberHoursChecker(account,(slots[0].end-slots[0].start)/MIN);return slots.filter(s=>contains(s.start,s.end));}
+  memberHoursChecker(account,duration,now=Date.now(),type=null){const limit=hostLimit({kind:this.workspaceKind(),account,type});return limit?workingWindowChecker({...DEFAULT,...limit,notice:0,horizon:60,duration},now):()=>true;}
+  memberHoursAllow(account,start,end,type=null){return this.memberHoursChecker(account,(end-start)/MIN,Date.now(),type)(start,end);}
+  memberHoursSlots(account,slots,type=null){if(!slots.length||!hostLimit({kind:this.workspaceKind(),account,type}))return slots;const contains=this.memberHoursChecker(account,(slots[0].end-slots[0].start)/MIN,Date.now(),type);return slots.filter(s=>contains(s.start,s.end));}
   canonicalizeOwnedReferences(accountId){
     const account=this.account(accountId);if(!account?.ownerMemberId)return;
     const types=(this.meta('meetingTypes')??[]).map(type=>{
@@ -280,13 +307,33 @@ export class BookingLedger {
     // snapshots retain their original calendars for deterministic recovery.
     this.putMeta('meetingTypes',types);
   }
-  async connect(g){if(!g?.email||!g.tokens?.refresh_token)throw Error('A fresh Google grant is required');const id=g.accountId??g.id??g.email.toLowerCase();const old=this.account(id);if(!g.ownerMember&&old?.consentWithdrawn)throw Object.assign(Error('The calendar owner must reconnect their own withdrawn contribution.'),{status:409});if(g.ownerMember){await this.currentCalendarMember(g.ownerMember);if(g.email.toLowerCase()!==g.ownerMember.email||g.ownerMember.fenceEpoch!==this.memberCalendarEpoch(g.ownerMember.id)||old&&(old.email?.toLowerCase()!==g.ownerMember.email||old.ownerMemberId&&old.ownerMemberId!==g.ownerMember.id))throw Object.assign(Error('This calendar requires administrator review or a fresh connection.'),{status:409});}const grant=await encryptTokens(g.tokens,this.env.TOKEN_ENCRYPTION_KEY,this.hostId());if(g.ownerMember){await this.currentCalendarMember(g.ownerMember);if(g.ownerMember.fenceEpoch!==this.memberCalendarEpoch(g.ownerMember.id))throw Object.assign(Error('Company access changed. Reconnect your calendar.'),{status:409});}const latest=this.account(id);if(latest?.connectionVersion!==old?.connectionVersion)throw Object.assign(Error('Calendar connection changed. Try again.'),{status:409});this.putAccount({...withoutReconnect(old),...(g.ownerMember?{ownerMemberId:g.ownerMember.id,ownerJoinedAt:g.ownerMember.joinedAt,ownerFenceEpoch:g.ownerMember.fenceEpoch,consentWithdrawn:false}:{}),id,email:g.email,...(g.credentialOwnerId?{credentialOwnerId:g.credentialOwnerId}:{}),grant,connected:true,connectionVersion:(old?.connectionVersion??0)+1,syncCooldownUntil:0,syncFailures:0,destinationCalendarId:old?.destinationCalendarId??'',conflictCalendarIds:old?.conflictCalendarIds??[]});if(g.ownerMember)this.canonicalizeOwnedReferences(id);this.sql.exec("UPDATE live_bookings SET body=json_set(body,'$.syncAfter',0) WHERE status='confirmed' AND (json_extract(body,'$.accountId')=? OR EXISTS (SELECT 1 FROM json_each(live_bookings.body,'$.teamAssignment.hosts') WHERE json_extract(value,'$.accountId')=?))",id,id);this.availabilityCache.clear();await this.resumeConfirmedSync();return this.settings();}
+  async connect(g){if(!g?.email||!g.tokens?.refresh_token)throw Error('A fresh Google grant is required');const id=g.accountId??g.id??g.email.toLowerCase();const old=this.account(id);if(!g.ownerMember&&old?.consentWithdrawn)throw Object.assign(Error('The calendar owner must reconnect their own withdrawn contribution.'),{status:409});if(g.ownerMember){await this.currentCalendarMember(g.ownerMember);if(g.email.toLowerCase()!==g.ownerMember.email||g.ownerMember.fenceEpoch!==this.memberCalendarEpoch(g.ownerMember.id)||old&&(old.email?.toLowerCase()!==g.ownerMember.email||old.ownerMemberId&&old.ownerMemberId!==g.ownerMember.id))throw Object.assign(Error('This calendar requires administrator review or a fresh connection.'),{status:409});}const grant=await encryptTokens(g.tokens,this.env.TOKEN_ENCRYPTION_KEY,this.hostId());if(g.ownerMember){await this.currentCalendarMember(g.ownerMember);if(g.ownerMember.fenceEpoch!==this.memberCalendarEpoch(g.ownerMember.id))throw Object.assign(Error('Company access changed. Reconnect your calendar.'),{status:409});}const latest=this.account(id);if(latest?.connectionVersion!==old?.connectionVersion)throw Object.assign(Error('Calendar connection changed. Try again.'),{status:409});this.putAccount({...withoutReconnect(old),...(g.ownerMember?{ownerMemberId:g.ownerMember.id,ownerJoinedAt:g.ownerMember.joinedAt,ownerFenceEpoch:g.ownerMember.fenceEpoch,consentWithdrawn:false}:{}),id,email:g.email,...(g.credentialOwnerId?{credentialOwnerId:g.credentialOwnerId}:{}),grant,connected:true,connectionVersion:(old?.connectionVersion??0)+1,syncCooldownUntil:0,syncFailures:0,destinationCalendarId:old?.destinationCalendarId||g.email,conflictCalendarIds:old?.conflictCalendarIds??[g.email]});if(g.ownerMember)this.canonicalizeOwnedReferences(id);if(!g.ownerMember&&this.workspaceKind()==='personal')this.adoptStarterLinks(id);this.sql.exec("UPDATE live_bookings SET body=json_set(body,'$.syncAfter',0) WHERE status='confirmed' AND (json_extract(body,'$.accountId')=? OR EXISTS (SELECT 1 FROM json_each(live_bookings.body,'$.teamAssignment.hosts') WHERE json_extract(value,'$.accountId')=?))",id,id);this.availabilityCache.clear();await this.resumeConfirmedSync();return this.settings();}
   async access(id){let a=this.account(id);if(!a?.connected)throw Error('Calendar account is disconnected');const version=a.connectionVersion,current=()=>{const latest=this.account(id);if(!latest?.connected||latest.connectionVersion!==version)throw Error('Calendar authorization changed.');return latest;};let t=await decryptTokens(a.grant,this.env.TOKEN_ENCRYPTION_KEY,this.hostId());current();if(!t.access_token||!t.expires_at||t.expires_at<Date.now()+MIN){let fresh;try{fresh=await this.google.refreshTokens({clientId:this.env.GOOGLE_CLIENT_ID,clientSecret:this.env.GOOGLE_CLIENT_SECRET,refreshToken:t.refresh_token},{timeoutMs:10000});}catch(error){if(google.grantRejected(error))this.markReconnect(id,version);throw error;}t={...t,...fresh,refresh_token:fresh.refresh_token??t.refresh_token,expires_at:fresh.expires_at??Date.now()+(fresh.expires_in??3600)*1000};const grant=await encryptTokens(t,this.env.TOKEN_ENCRYPTION_KEY,this.hostId());a=current();this.putAccount({...withoutReconnect(a),grant});}current();return t.access_token;}
   // Keep the grant and every booking path unchanged; only record that Google
   // refused it so Studio can ask the owner to reconnect.
   markReconnect(id,version){const a=this.account(id);if(a?.connected&&a.connectionVersion===version&&!a.reconnectRequired){this.putAccount({...a,reconnectRequired:true});this.availabilityCache.clear();}}
   // One rejected grant must not hide the other accounts' calendars.
   async accountCalendars(a){try{return {calendars:await this.google.listCalendars(await this.access(a.id),{timeoutMs:10000})};}catch(error){if(!google.grantRejected(error))throw error;if(!this.account(a.id)?.reconnectRequired)throw Object.assign(Error('Calendar connection changed. Reload and try again.'),{status:409});return {reconnectRequired:true,calendars:[]};}}
+  // The host's own calendar events for the Availability week. Titles go only
+  // to that host; calendars shared as free/busy come back as untitled blocks.
+  async calendarEventsFor(accounts,range){
+    const from=Number(range?.from),to=Number(range?.to),now=Date.now();
+    if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||to<=from||to-from>8*86400000||from<now-60*86400000||to>now+400*86400000)throw Object.assign(Error('Choose a week to show.'),{status:400});
+    const timeMin=new Date(from).toISOString(),timeMax=new Date(to).toISOString(),events=[],calendars=[];
+    for(const account of accounts){
+      if(!account?.connected||account.reconnectRequired)continue;
+      let access;try{access=await this.access(account.id);}catch(error){if(google.grantRejected(error))continue;throw error;}
+      const listed=await this.google.listCalendars(access,{timeoutMs:10000}),items=(Array.isArray(listed)?listed:listed?.items??[]).filter(c=>!c.deleted),busy=new Set(this.conflictIds(account));
+      for(const c of items)calendars.push({accountId:account.id,id:c.id,summary:c.summary||c.id,color:/^#[0-9a-f]{6}$/i.test(c.backgroundColor??'')?c.backgroundColor:null,accessRole:c.accessRole,primary:c.primary===true,busy:busy.has(c.id),destination:c.id===account.destinationCalendarId});
+      for(const id of busy){if(!items.some(c=>c.id===id))continue;
+        try{for(const e of await this.google.listEvents(access,{calendarId:id,timeMin,timeMax},{timeoutMs:10000}))events.push({...e,accountId:account.id,calendarId:id});}
+        catch(error){if(error?.status!==403&&error?.status!==404)throw error;for(const b of await this.google.freeBusy(access,{calendarIds:[id],timeMin,timeMax},{timeoutMs:10000}))events.push({start:Date.parse(b.start),end:Date.parse(b.end),allDay:false,title:'',booking:false,accountId:account.id,calendarId:id});}
+      }
+    }
+    return {events,calendars};
+  }
+  calendarEvents(range){return this.calendarEventsFor(this.accounts().filter(a=>!a.ownerMemberId),range);}
+  async ownCalendarEvents(member,range){await this.currentCalendarMember(member);const account=this.ownAccount(member);return this.calendarEventsFor(account?[account]:[],range);}
   async listCalendars(){return {accounts:await Promise.all(this.accounts().filter(a=>a.connected).map(async a=>({id:a.id,email:a.email,...(a.ownerMemberId?{ownerMemberId:a.ownerMemberId,calendars:[]}:await this.accountCalendars(a))})))};}
   async configureCalendars(data){
     if(!Array.isArray(data.accounts)||data.accounts.length>50)throw Error('Invalid calendar selections');
@@ -320,7 +367,7 @@ export class BookingLedger {
     this.availabilityCache.clear();
     return this.settings();
   }
-  type(slug,preview=false){const type=(this.meta('meetingTypes')??[]).find(t=>t.slug===slug&&(t.published||preview));return type?{...type,...(type.useDefaultCalendar!==false||this.account(type.accountId)?.ownerMemberId?{calendarId:this.account(type.accountId)?.destinationCalendarId??''}:{}),...resolveAvailabilitySchedule(type,this.meta('availabilitySchedules')??[],this.meta('defaultAvailabilityScheduleId')??null)}:undefined;}
+  type(slug,preview=false){const type=(this.meta('meetingTypes')??[]).find(t=>t.slug===slug&&(t.published||preview));return type?{...type,...(type.useDefaultCalendar!==false||this.account(type.accountId)?.ownerMemberId?{calendarId:this.account(type.accountId)?.destinationCalendarId??''}:{}),...this.resolveHours(type)}:undefined;}
   destination(t){if(t.teamScheduling){const host=this.teamHosts(t)[0];return {a:this.account(host.accountId),calendarId:host.calendarId};}const a=this.account(t.accountId);const calendarId=t.useDefaultCalendar===false&&!a?.ownerMemberId?t.calendarId:a?.destinationCalendarId;if(!a?.connected||!calendarId)throw Error('This meeting is not accepting bookings');return {a,calendarId};}
   conflictIds(account,types=this.meta('meetingTypes')??[]){if(account.ownerMemberId)return [...new Set([account.destinationCalendarId,...(account.conflictCalendarIds??[])].filter(Boolean))];const ids=[...new Set([account.destinationCalendarId,...(account.conflictCalendarIds??[]),...types.filter(t=>t.accountId===account.id).map(t=>t.useDefaultCalendar===false?t.calendarId:account.destinationCalendarId),...types.flatMap(t=>(t.teamScheduling?.hosts??[]).filter(h=>h.accountId===account.id).map(h=>h.useDefaultCalendar?account.destinationCalendarId:h.calendarId))].filter(Boolean))];if(ids.length>50)throw Error('At most 50 calendars per account can be checked for conflicts.');return ids;}
   validateConflictCapacity(types,accounts=new Map(this.accounts().map(a=>[a.id,a]))){for(const account of accounts.values())if(account.connected)this.conflictIds(account,types);}
@@ -414,7 +461,7 @@ export class BookingLedger {
     }));return {busy:result,versions};
   }
   teamSlots(type,hosts,busy,from,to,{exclude,now=Date.now(),fixedIds=null}={}){
-    const memberWindows=new Map(hosts.map(host=>[host.id,this.memberHoursChecker(this.account(host.accountId),type.duration,now)]));
+    const memberWindows=new Map(hosts.map(host=>[host.id,this.memberHoursChecker(this.account(host.accountId),type.duration,now,type)]));
     if(type.teamScheduling.mode==='all'){
       if(hosts.some(h=>h.memberEligible===false||!this.memberAccountAvailable(this.account(h.accountId))))return [];
       const resources=hosts.map(host=>({host,contains:workingWindowChecker(host.policy,now),busy:[...(busy[host.id]??[]),...this.teamLocalBusy(host,exclude)]}));
@@ -476,7 +523,7 @@ export class BookingLedger {
     this.availabilityCache.set(key,entry);
     return entry.promise;
   }
-  async availability(slug,range={}){await this.refreshMemberEligibility();if(range.preview!==true&&this.maintenanceFrozen())return maintenanceRefusal();const maintenanceEpoch=this.maintenanceEpoch(),t=durationPolicy(this.type(slug,range.preview===true),range.duration,!!range.acceptedBooking);if(!t)return fail('Meeting not found',404);if(range.preview!==true&&!range.acceptedBooking){const closed=this.linkAdmission(t);if(closed)return closed;}this.destination(t);const now=Date.now(),from=Math.max(now,Number(range.from)||now),to=Math.min(now+t.horizon*86400000,Number(range.to)||now+t.horizon*86400000);try{if(t.teamScheduling)return await this.teamAvailability(t,from,to,range,maintenanceEpoch);const busy=await this.availabilityBusy(from-policyBuffers(t).before,to+policyBuffers(t).after);await this.refreshMemberEligibility();if(!this.memberAccountAvailable(this.account(t.accountId)))throw Error('A member calendar needs reconnection.');if(range.preview!==true&&this.maintenanceChanged(maintenanceEpoch))return maintenanceRefusal();if(range.preview!==true&&!range.acceptedBooking){const closed=this.linkAdmission(this.type(slug));if(closed)return closed;}const {teamScheduling,followUpSubject,followUpBody,...publicConfig}=validateConfig(t);return {config:{...publicConfig,...Object.fromEntries(['avatarImage','bannerImage'].map(key=>[key,this.meta('profile')?.[key]??null]))},slots:this.quotaSlots(t,this.memberHoursSlots(this.account(t.accountId),liveSlots(t,now,[...busy,...this.localBusy(range.acceptedBooking?.id)],from,to)),range.acceptedBooking?.id),mode:'live'};}catch(error){return fail(error.status===409?error.message:'Calendar availability is temporarily unavailable.',error.status===409?409:503);}}
+  async availability(slug,range={}){await this.refreshMemberEligibility();if(range.preview!==true&&this.maintenanceFrozen())return maintenanceRefusal();const maintenanceEpoch=this.maintenanceEpoch(),t=durationPolicy(this.type(slug,range.preview===true),range.duration,!!range.acceptedBooking);if(!t)return fail('Meeting not found',404);if(range.preview!==true&&!range.acceptedBooking){const closed=this.linkAdmission(t);if(closed)return closed;}this.destination(t);const now=Date.now(),from=Math.max(now,Number(range.from)||now),to=Math.min(now+t.horizon*86400000,Number(range.to)||now+t.horizon*86400000);try{if(t.teamScheduling)return await this.teamAvailability(t,from,to,range,maintenanceEpoch);const busy=await this.availabilityBusy(from-policyBuffers(t).before,to+policyBuffers(t).after);await this.refreshMemberEligibility();if(!this.memberAccountAvailable(this.account(t.accountId)))throw Error('A member calendar needs reconnection.');if(range.preview!==true&&this.maintenanceChanged(maintenanceEpoch))return maintenanceRefusal();if(range.preview!==true&&!range.acceptedBooking){const closed=this.linkAdmission(this.type(slug));if(closed)return closed;}const {teamScheduling,followUpSubject,followUpBody,...publicConfig}=validateConfig(t);return {config:{...publicConfig,...Object.fromEntries(['avatarImage','bannerImage'].map(key=>[key,this.meta('profile')?.[key]??null]))},slots:this.quotaSlots(t,this.memberHoursSlots(this.account(t.accountId),liveSlots(t,now,[...busy,...this.localBusy(range.acceptedBooking?.id)],from,to),t),range.acceptedBooking?.id),mode:'live'};}catch(error){return fail(error.status===409?error.message:'Calendar availability is temporarily unavailable.',error.status===409?409:503);}}
   async rescheduleAvailability(id,token,range={},authority={}){
     if(this.maintenanceFrozen())return maintenanceRefusal();const epoch=this.maintenanceEpoch(),booking=await this.authorize(id,token);
     if(!booking)return fail('Booking link not found',404);const closed=closedChange(booking,'reschedule',authority);if(closed)return closed;
@@ -538,7 +585,7 @@ export class BookingLedger {
       const current=this.type(b.meetingTypeSlug),exclude=[id,b.replacesId];
       if(!current||current.id!==type.id||current.accountId!==type.accountId||current.calendarId!==type.calendarId||JSON.stringify(validateConfig(current))!==JSON.stringify(validateConfig(type))||hosts&&(this.teamSignature({...durationPolicy(current,policy.duration,true),notice:0})!==signature||!this.teamAccountsCurrent({hosts},busy.versions)))return fail('Availability changed while checking this request. Try again.',409);
       let assignment;if(hosts)assignment=this.chooseTeamAssignment(policy,hosts,busy.busy,b.start,b.end,{exclude,original:b});
-      if(!hosts&&(!this.memberAccountAvailable(this.account(b.accountId))||!this.memberHoursAllow(this.account(b.accountId),b.start,b.end)))return fail('The meeting host is unavailable. Review this request.',409);
+      if(!hosts&&(!this.memberAccountAvailable(this.account(b.accountId))||!this.memberHoursAllow(this.account(b.accountId),b.start,b.end,policy)))return fail('The meeting host is unavailable. Review this request.',409);
       if((hosts?!assignment:!liveSlots(policy,Date.now(),[...busy,...this.localBusy(exclude)],b.start,b.end).some(slot=>slot.start===b.start))||!this.withinDailyLimit(policy,b.start,exclude,b.end))return fail('That time is no longer available. Decline this request or ask the guest to choose another time.',409);
       if(assignment)b.teamAssignment=assignment;
       const original=b.replacesId?this.booking(b.replacesId):null;
@@ -597,7 +644,7 @@ export class BookingLedger {
     if(!latest||latest.id!==t.id||latest.accountId!==t.accountId||latest.calendarId!==t.calendarId||JSON.stringify(validateConfig(latest))!==JSON.stringify(validateConfig(t)))return fail('Availability settings changed. Refresh the booking page and choose again.',409);
     if(this.rows('SELECT id FROM live_bookings WHERE request_key=?',requestKey).length)return this.reserve(slug,data,replacesId,authority);
     if(teamContext){if(this.teamSignature(latest)!==teamContext.signature||!this.teamAccountsCurrent({hosts:teamContext.hosts},teamContext.versions))return fail('Team availability changed. Refresh the booking page and choose again.',409);const assignment=this.chooseTeamAssignment(t,teamContext.hosts,teamContext.busy,start,end,{exclude:replacesId,original,requestedHostId});if(!assignment)return fail('That time is no longer available for the selected hosts.',409);teamContext.assignment=assignment;destination={a:this.account(assignment.hosts[0].accountId),calendarId:assignment.hosts[0].calendarId};}
-    else if(!this.memberAccountAvailable(this.account(t.accountId))||!this.memberHoursAllow(this.account(t.accountId),start,end)||!liveSlots(t,Date.now(),this.localBusy(replacesId),start,end).some(s=>s.start===start))return fail('That time is no longer available.',409);
+    else if(!this.memberAccountAvailable(this.account(t.accountId))||!this.memberHoursAllow(this.account(t.accountId),start,end,t)||!liveSlots(t,Date.now(),this.localBusy(replacesId),start,end).some(s=>s.start===start))return fail('That time is no longer available.',409);
     if(!this.withinDailyLimit(t,start,replacesId))return fail('The booking limit has been reached. Choose another day or week.',409);
     if(requiresApproval&&(!this.approvalCapacity(email,replacesId)||Math.min(createdAt+(original?.config.approvalExpiryMinutes??t.approvalExpiryMinutes)*MIN,start)<=Date.now()))return fail('This request can no longer be accepted. Choose another time or cancel an existing request.',409);
     if(replacesId){const closed=closedChange(this.booking(replacesId),'reschedule',authority);if(closed)return closed;}
