@@ -90,8 +90,8 @@ export async function operationalStatus(ledger,{now=Date.now(),alarm=null,bookma
 
   // Accounts are bounded by the owner's connected Google calendars.
   const accounts=ledger.accounts();
-  const accountSummary={connected:accounts.filter(a=>a.connected).length,disconnected:accounts.filter(a=>!a.connected).length,coolingDown:accounts.filter(a=>a.syncCooldownUntil>now).length};
-  if(authorizationBookings||accountSummary.disconnected&&(pending.summary.count||cancelling.summary.count))issues.push(issue('calendar_authorization',authorizationBookings||accountSummary.disconnected));
+  const accountSummary={connected:accounts.filter(a=>a.connected).length,disconnected:accounts.filter(a=>!a.connected).length,coolingDown:accounts.filter(a=>a.syncCooldownUntil>now).length,reconnectNeeded:accounts.filter(a=>a.connected&&a.reconnectRequired).length};
+  if(authorizationBookings||accountSummary.reconnectNeeded||accountSummary.disconnected&&(pending.summary.count||cancelling.summary.count))issues.push(issue('calendar_authorization',authorizationBookings||accountSummary.reconnectNeeded||accountSummary.disconnected));
 
   const jobTotal=ledger.rows('SELECT COUNT(*) AS n FROM live_jobs')[0].n;
   const parkedTotal=ledger.rows("SELECT COUNT(*) AS n FROM live_jobs WHERE json_extract(body,'$.requiresAttention')=1")[0].n;
