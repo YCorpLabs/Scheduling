@@ -67,6 +67,12 @@ async function tokenRequest(params, options) {
 export function exchangeCode({ clientId, clientSecret, redirectUri, code, codeVerifier }, options) {
   return tokenRequest({ client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, code, code_verifier: codeVerifier, grant_type: 'authorization_code' }, options);
 }
+// Google refused the stored grant: revoked, expired (Testing-mode grants last
+// 7 days) or issued to another OAuth client. Only a new consent fixes it.
+export function grantRejected(error) {
+  return error?.code === 'invalid_grant' || error?.status === 401;
+}
+export const RECONNECT_CODE = 'calendar_reconnect_required';
 export function refreshTokens({ clientId, clientSecret, refreshToken }, options) {
   return tokenRequest({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }, options);
 }
