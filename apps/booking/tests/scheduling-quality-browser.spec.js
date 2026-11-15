@@ -43,6 +43,9 @@ test.describe('owner status',()=>{
     const {calls}=await studio(page,{resolve:body=>({json:{ok:true},next:healthy})});
     await expect(page.getByText('2 issues need attention')).toBeVisible();
     await expect(page.locator('#account-trigger .account-issue-count')).toHaveText('2');
+    await page.locator('#account-trigger').click();
+    await expect(page.getByRole('dialog',{name:'Account settings'}).getByRole('button',{name:/^Troubleshooting/})).toContainText('2');
+    await page.keyboard.press('Escape');
     await expect(page.getByRole('list',{name:'Issues'}).getByRole('listitem')).toHaveCount(2);
     await expect(page.locator('.ops-card').filter({hasText:'Requests to approve'})).toContainText('2');
     await expect(page.getByText('To the person who booked · Provider timed out · Cloudflare')).toBeVisible();
@@ -66,7 +69,7 @@ test.describe('owner status',()=>{
     await expect(page.getByText('Nothing needs attention')).toBeVisible();
     const posts=calls.filter(c=>c.path!=='/api/live/settings');
     expect(posts).toEqual([{path:'/api/live/operations/deliveries/resolve',body:{jobId:'booking-parked-01:2:confirmed',outcome:'delivered',expectedUpdatedAt:critical.deliveries.review.items[0].updatedAt}}]);
-    await expect(page.getByRole('button',{name:'Run maintenance'})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Check now'})).toHaveCount(0);
   });
 
   test('a changed parked email is refused and cannot be resubmitted from the stale dialog',async({page})=>{
@@ -93,8 +96,8 @@ test.describe('owner status',()=>{
     await expect(details).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(open).toBeFocused();
-    await page.getByRole('button',{name:'Run maintenance'}).click();
-    await expect(page.locator('#host-status')).toHaveText('Maintenance finished');
+    await page.getByRole('button',{name:'Check now'}).click();
+    await expect(page.locator('#host-status')).toHaveText('Done');
     await expect(page.getByText('Nothing needs attention')).toBeVisible();
     expect(calls.filter(c=>c.path==='/api/live/repair')).toHaveLength(1);
   });
@@ -103,7 +106,7 @@ test.describe('owner status',()=>{
     await studio(page,{theme:'dark',status:{...critical,issues:[{code:'outbound_paused',severity:'warning',count:1,message:'Calendar changes, email sends and guest booking changes are paused for maintenance.',action:'Finish the maintenance or restore procedure.'},critical.issues[1]],outbound:{...critical.outbound,frozen:true,reason:'operator',inFlight:{calendar:0,deliveries:1}}}});
     await expect(page.getByText('Paused for maintenance',{exact:true})).toBeVisible();
     await expect(page.getByText(/Paused by you · since .* · 1 provider call in flight/)).toBeVisible();
-    await expect(page.getByRole('button',{name:'Run maintenance'})).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Check now'})).toHaveCount(0);
     await expect(page.getByRole('button',{name:/resume|release/i})).toHaveCount(0);
     await page.screenshot({path:join(shots,'scheduling-status-dark.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});

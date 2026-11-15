@@ -3,10 +3,11 @@ import {validDuration,normalizeDurationOptions} from './durations.js';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const COMMON_DURATIONS=[15,30,45,60,90];
 export const MAX_DURATION_OPTIONS=4;
-export function durationLabel(minutes){const h=Math.floor(minutes/60),m=minutes%60;return h&&m?`${h} hr ${m} min`:h?`${h} hr`:`${m} min`;}
+// Lengths always read in minutes ("90 min"), so lists never mix formats.
+export function durationLabel(minutes){return `${minutes} min`;}
 /** Allowed lengths without throwing; a malformed config falls back to its fixed default. */
 export function guestDurations(config){try{return normalizeDurationOptions(config?.durationOptions??null,config?.duration)??[config.duration];}catch{return validDuration(config?.duration)?[config.duration]:[];}}
-export function durationSummary(t){const list=guestDurations(t);return list.length>1?[...list].sort((a,b)=>a-b).map(durationLabel).join(' · '):durationLabel(t.duration);}
+export function durationSummary(t){const list=[...guestDurations(t)].sort((a,b)=>a-b);return list.length>1?`${list.slice(0,-1).join(', ')} or ${list.at(-1)} min`:durationLabel(t.duration);}
 
 // ---- Host editor ----
 function chips(duration,extras,palette=[]){const values=[...new Set([...COMMON_DURATIONS,...palette,...extras,duration])].filter(validDuration).sort((a,b)=>a-b),full=extras.length>=MAX_DURATION_OPTIONS-1;

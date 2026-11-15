@@ -1,4 +1,4 @@
-import {followUpContent} from '/followup.js';
+import {followUpContent} from './followup.js';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const timings=[5,30,60,180,1440,2880,10080];
 const label=n=>n%1440===0?`${n/1440} day${n===1440?'':'s'} later`:n%60===0?`${n/60} hour${n===60?'':'s'} later`:`${n} minutes later`;

@@ -126,7 +126,7 @@ test('guest closed view is minimal, escaped and never claims an uncertain reques
 
 test('wiring: Studio, editor and guest use the link access module; stylesheet is standalone',()=>{
  const host=readFileSync(new URL('../public/host-ui.js',import.meta.url),'utf8'),editor=readFileSync(new URL('../public/host-editor.js',import.meta.url),'utf8'),app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),css=readFileSync(new URL('../public/link-access-ui.css',import.meta.url),'utf8');
- assert.match(host,/linkAccessMarkup\(t,\{access:accessFor\(settings,t\.id\)\}\)/);assert.match(host,/bindLinkAccess\(form\)/);assert.match(host,/draftPreview\(settings,previewDraft\(draft\)/);
+ assert.match(readFileSync(new URL('../public/link-editor-ui.js',import.meta.url),'utf8'),/linkAccessMarkup\(t,\s*\{\s*access:\s*accessFor\(settings,\s*t\.id\)\s*\}\)/);assert.match(host,/bindLinkAccess\(form\)/);assert.match(host,/draftPreview\(settings,\s*previewDraft\(draft\)/);
  assert.match(editor,/readLinkAccess\(form\)/);
  assert.match(app,/isLinkClosed\(err\)\)\{showClosedLink/);
  assert.doesNotMatch(app.slice(app.indexOf('function showClosedLink')).split('\n')[0],/requestKey=|draft=/,'closed view keeps the idempotency key and draft');

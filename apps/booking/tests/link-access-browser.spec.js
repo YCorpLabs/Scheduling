@@ -30,8 +30,8 @@ async function fixture(page,{types=[{}],linkAccess={},guest=true,availability=nu
  });
  return {writes,books,manage,requests,get settings(){return settings;}};
 }
-const rules=async page=>{await page.goto(base+'/studio#link=intro');await page.getByRole('tab',{name:'Booking rules',exact:true}).click();return page.locator('[data-link-access]');};
-const save=async page=>{await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');};
+const rules=async page=>{await page.goto(base+'/studio#link=intro');await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));return page.locator('[data-link-access]');};
+const save=async page=>{await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');};
 
 test('Link access is one collapsed disclosure; configuring single use and an expiry saves exact values',async({page})=>{
  const state=await fixture(page,{guest:false});const fold=await rules(page);
@@ -44,15 +44,15 @@ test('Link access is one collapsed disclosure; configuring single use and an exp
  await at.fill('2030-12-04T09:00');await expect(fold.locator('summary small')).toHaveText('One booking · Until 4 Dec 2030, 09:00');
  await save(page);
  expect(state.writes[0].meetingTypes[0]).toMatchObject({singleUse:true,expiresAt:Date.UTC(2030,11,4,8,0),published:true});
- await page.getByRole('tab',{name:'Booking rules',exact:true}).click();await expect(page.locator('[data-link-access]')).toHaveAttribute('open','');
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));await expect(page.locator('[data-link-access]')).toHaveAttribute('open','');
  await expect(page.getByLabel('Expiry date and time')).toHaveValue('2030-12-04T09:00');
 });
 
 test('a past or empty expiry is rejected inside the fold without saving',async({page})=>{
  const state=await fixture(page,{guest:false});const fold=await rules(page);await fold.locator('summary').click();
- await page.getByLabel('Expires',{exact:true}).selectOption('date');await page.getByRole('button',{name:/Save changes/}).click();
+ await page.getByLabel('Expires',{exact:true}).selectOption('date');await page.getByRole('button',{name:'Save',exact:true}).click();
  await expect(fold.getByRole('alert')).toHaveText('Choose when this link expires.');
- await page.getByLabel('Expiry date and time').fill('2020-01-01T09:00');await page.getByRole('button',{name:/Save changes/}).click();
+ await page.getByLabel('Expiry date and time').fill('2020-01-01T09:00');await page.getByRole('button',{name:'Save',exact:true}).click();
  await expect(fold.getByRole('alert')).toHaveText('Choose a future expiry time.');expect(state.writes).toHaveLength(0);
 });
 
@@ -60,27 +60,28 @@ test('saved non-minute expiry and single use roundtrip unchanged through an unre
  const state=await fixture(page,{guest:false,types:[{expiresAt:future,singleUse:true}]});const fold=await rules(page);
  await expect(fold).toHaveAttribute('open','');await expect(page.getByLabel('Expiry date and time')).toHaveValue('2030-12-04T09:00');
  await expect(page.getByLabel('One booking only')).toBeChecked();
- await page.getByRole('tab',{name:'Details',exact:true}).click();await page.getByLabel('Meeting name',{exact:true}).fill('Renamed');await save(page);
+ await page.locator('#meeting-form').waitFor();await page.getByLabel('Meeting name',{exact:true}).fill('Renamed');await save(page);
  expect(state.writes[0].meetingTypes[0]).toMatchObject({title:'Renamed',expiresAt:future,singleUse:true});
  // Switching to Never clears only the expiry.
- await page.getByRole('tab',{name:'Booking rules',exact:true}).click();await page.getByLabel('Expires',{exact:true}).selectOption('never');await save(page);
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));await page.getByLabel('Expires',{exact:true}).selectOption('never');await save(page);
  expect(state.writes[1].meetingTypes[0]).toMatchObject({expiresAt:null,singleUse:true});
 });
 
 test('owner list and editor show Expired/Used, keep the manual switch and re-enabling single use stays used',async({page})=>{
  const state=await fixture(page,{guest:false,omitAccessOnSave:true,types:[{singleUse:true},{expiresAt:past},{singleUse:false},{published:false,expiresAt:past}],linkAccess:{intro:{state:'used',used:true,expiresAt:null},link1:{state:'expired',used:false,expiresAt:past},link2:{state:'open',used:true,expiresAt:null}}});
- await page.goto(base+'/studio');
- const row=name=>page.locator('.booking-link-row',{has:page.getByRole('button',{name:`Edit ${name}`,exact:true})}).locator('[data-link-state]');
- await expect(row('Intro')).toHaveText('Used');await expect(row('Link 1')).toHaveText('Expired');await expect(row('Link 2')).toHaveText('Active');await expect(row('Link 3')).toHaveText('Paused');
+ await page.goto(base+'/studio#links');
+ const card=name=>page.locator('.lk-row',{has:page.getByRole('button',{name:`Edit ${name}`,exact:true})}),row=name=>card(name).locator('.pill');
+ await expect(row('Intro')).toHaveText('Used');await expect(row('Link 1')).toHaveText('Expired');await expect(row('Link 2')).toHaveCount(0);await expect(card('Link 2').getByRole('button',{name:'Copy link to Link 2',exact:true})).toBeVisible();await expect(row('Link 3')).toHaveText('Off');
+ for(const name of ['Intro','Link 1','Link 3'])await expect(card(name).locator('[data-copy-booking-link]')).toHaveCount(0);
  await page.getByRole('button',{name:'Edit Intro',exact:true}).click();
- await expect(page.locator('[data-publish-label]')).toHaveText('Used');await expect(page.getByRole('checkbox',{name:'Accept bookings'})).toBeChecked();
- await page.getByRole('tab',{name:'Booking rules',exact:true}).click();await expect(page.locator('[data-link-access] summary small')).toHaveText('Used');
+ await expect(page.locator('[data-publish-label]')).toHaveText('On');await expect(page.getByRole('switch',{name:'Accept bookings'})).toBeChecked();
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));await expect(page.locator('[data-link-access] summary small')).toHaveText('Used');
  await expect(page.getByText('Already used. Closed to new bookings.')).toBeVisible();
  await page.getByLabel('One booking only').uncheck();await expect(page.locator('[data-link-access] summary small')).toHaveText('Open');await save(page);
  expect(state.writes[0].meetingTypes[0]).toMatchObject({singleUse:false,published:true});expect(state.writes[0].linkAccess).toBeUndefined();
- await page.getByRole('tab',{name:'Booking rules',exact:true}).click();await page.locator('[data-link-access] summary').click();await page.getByLabel('One booking only').check();
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));await page.locator('[data-link-access] summary').click();await page.getByLabel('One booking only').check();
  await expect(page.getByText('Already used. Closed to new bookings.')).toBeVisible();await save(page);
- expect(state.writes[1].meetingTypes[0]).toMatchObject({singleUse:true});await expect(page.locator('[data-publish-label]')).toHaveText('Used');
+ expect(state.writes[1].meetingTypes[0]).toMatchObject({singleUse:true,published:true});await expect(page.locator('[data-link-access] summary small')).toHaveText('Used');await expect(page.getByRole('switch',{name:'Accept bookings'})).toBeChecked();
  await page.locator('#back-to-links').click();await expect(row('Intro')).toHaveText('Used');
 });
 
@@ -113,7 +114,8 @@ test('existing management and rescheduling stay usable after the public link clo
 test('owner preview of an expired, used link is local, shows example times and sends nothing',async({page})=>{
  const state=await fixture(page,{guest:false,types:[{expiresAt:past,singleUse:true}],linkAccess:{intro:{state:'expired',used:true,expiresAt:past}}});
  await page.goto(base+'/studio#link=intro');await expect(page.locator('#meeting-form')).toBeVisible();const before=state.requests.length;
- await page.locator('#preview-link').click();const frame=page.frameLocator('iframe');
+ const live=page.locator('[data-live-preview]');await expect(live.locator('.mini-slots span').first()).toBeVisible();await expect(live).not.toContainText(/This link has/);
+ await page.locator('#back-to-links').click();await page.getByRole('button',{name:'More for Intro',exact:true}).click();await page.getByRole('menuitem',{name:'Preview',exact:true}).click();const frame=page.frameLocator('iframe');
  await expect(frame.getByRole('heading',{name:'Intro',exact:true})).toBeVisible();await expect(frame.locator('.slot,[data-slot]').first()).toBeVisible();
  await expect(frame.getByText(/This link has/)).toHaveCount(0);
  const after=state.requests.slice(before).map(r=>r.path);expect(after.filter(p=>/availability|visit|book|public/.test(p))).toEqual([]);
@@ -141,11 +143,12 @@ test('390px guest closed view fits and focuses its heading',async({page})=>{
 
 
 test('closed links cannot be copied or embedded from Share and offer access editing',async({page})=>{
- await fixture(page,{guest:false,types:[{expiresAt:past}]});await page.goto(base+'/studio');
- await page.getByRole('button',{name:'Share Intro',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Share and preview booking link'});
+ await fixture(page,{guest:false,types:[{expiresAt:past}]});await page.goto(base+'/studio#links');
+ await expect(page.locator('.lk-row [data-copy-booking-link]')).toHaveCount(0);
+ await page.getByRole('button',{name:'More for Intro',exact:true}).click();await page.getByRole('menuitem',{name:'Embed',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Share and preview booking link'});
  await expect(dialog.getByRole('heading',{name:'This link has expired'})).toBeVisible();await expect(dialog.locator('[data-copy-link],.share-code')).toHaveCount(0);
  await dialog.getByRole('button',{name:'Edit link access'}).click();await expect(dialog).toHaveCount(0);
- await expect(page.getByRole('tab',{name:'Booking rules',exact:true})).toHaveAttribute('aria-selected','true');await expect(page.locator('[data-link-access] summary')).toBeFocused();
+ await expect(page.locator('#meeting-form details.le-row[data-row=limits]')).toHaveAttribute('open','');await expect(page.locator('[data-link-access] summary')).toBeFocused();
  await expect(page.getByLabel('Expiry date and time')).toBeVisible();
 });
 

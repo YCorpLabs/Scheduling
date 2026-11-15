@@ -104,9 +104,9 @@ test('source guards: staff use private routes; guest reason, refusal and receipt
  const host=readFileSync(new URL('../public/host-ui.js',import.meta.url),'utf8'),manage=readFileSync(new URL('../public/manage-ui.js',import.meta.url),'utf8'),app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8'),editor=readFileSync(new URL('../public/host-editor.js',import.meta.url),'utf8');
  assert.ok(!host.includes("action:'cancel',token"),'staff cancel never uses the guest capability');
  assert.ok(!host.includes('?reschedule='),'staff reschedule is inline and authenticated');
- assert.match(host,/api\('bookings\/'\+encodeURIComponent\(id\)\+'\/cancel',reason\?\{reason\}:\{\}\)/);
+ assert.match(host,/api\(\s*["']bookings\/["']\s*\+\s*encodeURIComponent\(id\)\s*\+\s*["']\/cancel["'],\s*reason\s*\?\s*\{\s*reason\s*\}\s*:\s*\{\}\s*\)/);
  assert.ok(!/bypass|force/i.test(host.match(/data-cancel[^]*?finally/)?.[0]||''),'no bypass flag');
- assert.match(host,/changeRulesMarkup\(t\)/);assert.match(editor,/readChangeNotices\(form\)/);
+ assert.match(readFileSync(new URL('../public/link-editor-ui.js',import.meta.url),'utf8'),/changeRulesMarkup\(t\)/);assert.match(editor,/readChangeNotices\(form\)/);
  assert.match(manage,/call\('cancel',reason\?\{reason\}:\{\}\)/);assert.match(manage,/refused\.add\('cancel'\)/);assert.match(manage,/maxlength="\$\{REASON_MAX\}"/);
  assert.match(manage,/esc\(booking\.cancellationReason\)/);assert.match(host,/esc\(b\.cancellationReason\)/);
  assert.match(app,/changeNoteMarkup\(policyFor\(originalBooking\?bookingPolicy\(originalBooking\):config,selectedSlot\.start\)/);

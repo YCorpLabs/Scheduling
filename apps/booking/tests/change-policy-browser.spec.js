@@ -16,7 +16,7 @@ async function fixture(page,{type={},guest=true,view=null,cancel=null,detail=nul
   else if(path==='/api/live/workspaces')return route.fulfill({status:404,json:{error:'Unsupported'}});
   else if(path==='/api/live/settings'){if(req.method()==='POST'){const body=req.postDataJSON();writes.push(body.patch);settings={...settings,...body.patch,revision:'B'.repeat(43)};data={settings,revision:settings.revision};}else data=settings;}
   else if(path==='/api/live/calendars')data={accounts:[{id:'a',calendars:[{id:account.destinationCalendarId,summary:'Work',accessRole:'owner'}]}]};
-  else if(path==='/api/live/bookings')data={bookings:[detail]};
+  else if(path==='/api/live/bookings')data={bookings:detail?[detail]:[]};
   else if(path===`/api/live/bookings/${id}`)data={booking:detail,managementToken:'private-capability'};
   else if(path===`/api/live/bookings/${id}/availability`)data={mode:'live',config:settings.meetingTypes[0],slots:slots.map(s=>({start:s.start+86400000,end:s.end+86400000}))};
   else if(path===`/api/live/bookings/${id}/cancel`){detail={...detail,status:'cancelled',...(req.postDataJSON().reason?{cancellationReason:req.postDataJSON().reason}:{})};data={booking:detail};}
@@ -36,25 +36,25 @@ async function fixture(page,{type={},guest=true,view=null,cancel=null,detail=nul
 
 test('host configures both guest change cutoffs, defaults to anytime and preserves custom values',async({page})=>{
  const state=await fixture(page,{guest:false});await page.goto(base+'/studio#link=intro');
- await page.getByRole('tab',{name:'Booking rules',exact:true}).click();
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));
  const cancel=page.getByLabel('Cancel',{exact:true}),move=page.getByLabel('Reschedule',{exact:true});
  await expect(cancel).toHaveValue('0');await expect(move).toHaveValue('0');await expect(cancel.locator('option:checked')).toHaveText('Anytime');
  await cancel.selectOption('1440');await move.selectOption('custom');
  const amount=page.getByLabel('Reschedule cutoff amount');await expect(amount).toBeVisible();await expect(amount).toBeFocused();
  await amount.fill('90');await page.getByLabel('Reschedule cutoff unit').selectOption('1');
- await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
  expect(state.writes[0].meetingTypes[0]).toMatchObject({cancellationNoticeMinutes:1440,rescheduleNoticeMinutes:90});
  await expect(page.getByLabel('Reschedule',{exact:true}).locator('option:checked')).toHaveText('1 hr 30 min before');
- await page.getByLabel('Reschedule',{exact:true}).selectOption('custom');await page.getByLabel('Reschedule cutoff amount').fill('0');await page.getByRole('button',{name:/Save changes/}).click();expect(state.writes).toHaveLength(1);
+ await page.getByLabel('Reschedule',{exact:true}).selectOption('custom');await page.getByLabel('Reschedule cutoff amount').fill('0');await page.getByRole('button',{name:'Save',exact:true}).click();expect(state.writes).toHaveLength(1);
  await expect(page.getByText('Enter a reschedule cutoff as a whole number.').first()).toBeVisible();
 });
 
 test('a saved custom cutoff stays selected and unchanged when other fields are edited',async({page})=>{
  const state=await fixture(page,{guest:false,type:{cancellationNoticeMinutes:4320,rescheduleNoticeMinutes:0}});await page.goto(base+'/studio#link=intro');
- await page.getByRole('tab',{name:'Booking rules',exact:true}).click();
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));
  await expect(page.getByLabel('Cancel',{exact:true}).locator('option:checked')).toHaveText('3 days before');
- await page.getByRole('tab',{name:'Details',exact:true}).click();await page.getByLabel('Meeting name',{exact:true}).fill('Changed title');
- await page.getByRole('button',{name:/Save changes/}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ await page.locator('#meeting-form').waitFor();await page.getByLabel('Meeting name',{exact:true}).fill('Changed title');
+ await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
  expect(state.writes[0].meetingTypes[0]).toMatchObject({title:'Changed title',cancellationNoticeMinutes:4320,rescheduleNoticeMinutes:0});
 });
 
@@ -154,7 +154,7 @@ test('phone width, reduced motion and keyboard keep the manage page usable',asyn
 
 test('host change rules stack at phone width without horizontal scroll',async({page})=>{
  await page.setViewportSize({width:360,height:780});await fixture(page,{guest:false});await page.goto(base+'/studio#link=intro');
- await page.getByRole('tab',{name:'Booking rules',exact:true}).click();await page.getByLabel('Cancel',{exact:true}).selectOption('custom');
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));await page.getByLabel('Cancel',{exact:true}).selectOption('custom');
  const [a,b]=await Promise.all(['Cancel','Reschedule'].map(n=>page.getByLabel(n,{exact:true}).boundingBox()));expect(b.y).toBeGreaterThan(a.y);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.screenshot({path:'test-results/change-policy-host-phone.png',fullPage:true});

@@ -3,6 +3,7 @@ import {validateBrandImage} from '../public/branding.js';
 import {meetingDestination,policyReferenceAccounts} from './ledger.js';
 import {DEFAULT,validateConfig,reminderOffsets,normalizeAvailabilitySchedules,normalizeDefaultAvailabilityScheduleId,resolveAvailabilitySchedule} from '../public/policy.js';
 import {sha256} from './crypto.js';
+import {hoursSources,normalizeHoursWrite} from './hours-model.js';
 const problem=(message,status=400,code='invalid_settings')=>Object.assign(Error(message),{status,code});
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const stable=value=>JSON.stringify(value,(_key,item)=>object(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
@@ -48,8 +49,9 @@ export function normalizeSettingsPatch(current,patch,{reminders=true}={}){
     });
     if(current.meetingTypes.some(type=>!ids.has(type.id)))warnings.push('Removed meeting types keep existing bookings, but their public links and rescheduling pages will no longer be available.');
   }
-  const settings={...current,profile:{...current.profile,...normalized.profile},meetingTypes:normalized.meetingTypes??current.meetingTypes,availabilitySchedules:schedules,defaultAvailabilityScheduleId:defaultId};
-  try{for(const type of settings.meetingTypes){resolveAvailabilitySchedule(type,settings.availabilitySchedules,defaultId);validateTeamReferences(type.teamScheduling,policyReferenceAccounts(type,current.accounts,current.meetingTypes.find(t=>t.id===type.id)),settings.availabilitySchedules,{requireConnected:type.published});}}catch(error){throw problem(error.message);}
+  const kind=current.profile?.workspaceKind==='company'?'company':'personal',hours=normalizeHoursWrite({kind,availabilitySchedules:schedules,defaultAvailabilityScheduleId:defaultId,meetingTypes:normalized.meetingTypes??current.meetingTypes});
+  const settings={...current,profile:{...current.profile,...normalized.profile},meetingTypes:hours.meetingTypes,availabilitySchedules:hours.availabilitySchedules,defaultAvailabilityScheduleId:hours.defaultAvailabilityScheduleId};
+  try{for(const type of settings.meetingTypes){{const sources=hoursSources(kind,settings.availabilitySchedules,settings.defaultAvailabilityScheduleId);resolveAvailabilitySchedule(type,sources.schedules,sources.defaultId);}validateTeamReferences(type.teamScheduling,policyReferenceAccounts(type,current.accounts,current.meetingTypes.find(t=>t.id===type.id)),settings.availabilitySchedules,{requireConnected:type.published});}}catch(error){throw problem(error.message);}
   if((normalized.availabilitySchedules!==undefined||normalized.defaultAvailabilityScheduleId!==undefined)&&settings.meetingTypes.some(type=>{
     if(!type.scheduleId&&!type.useDefaultSchedule)return false;
     const old=current.meetingTypes.find(item=>item.id===type.id);if(!old)return false;

@@ -6,6 +6,7 @@ import { randomToken, sha256, timingSafeEqual } from './crypto.js';
 import { authorizationUrl, exchangeCode, getUserInfo } from './google.js';
 import {HttpError,response} from './http.js';
 import {brandFromEnv,escapeHTML,legalLinksMarkup} from '../public/brand.js';
+import {validateBrandImage,BRAND_IMAGES} from '../public/branding.js';
 import {workspaceAccess,ownCalendarMember,reserveWorkspaceOwnershipSync,releaseWorkspaceOwnershipSync} from './workspaces.js';
 
 const checkedHostResult=value=>{if(value?.error)throw Object.assign(new HttpError(value.status||503,value.error),{code:value.code});return value;};
@@ -260,7 +261,8 @@ export async function oauthCallback(request,env) {
   const actorId=saved.initiatorHostId||hostId,credentialOwnerId='h_'+(await sha256('google:'+user.sub)).slice(0,24);
   const finishCallback=async({write})=>{
   const host=env.LIVE_HOSTS.getByName(hostId);
-  if(!saved.hostId){checkedHostResult(await write(()=>host.init({id:hostId,name:user.name||user.email,email:user.email,profileSetupRequired:true})));await rememberVerifiedIdentity(env,{hostId,email:user.email});}
+  if(!saved.hostId){const avatarImage=await googlePicture(user.picture);
+      checkedHostResult(await write(()=>host.init({id:hostId,name:user.name||user.email,email:user.email,profileSetupRequired:true,...(avatarImage?{avatarImage}:{})})));await rememberVerifiedIdentity(env,{hostId,email:user.email});}
   if(saved.ownerMember){const target=env.AUTH.getByName('calendar-contributions:'+saved.ownerMember.id);for(let attempt=0;attempt<12;attempt++){const current=await target.get(),contributions=current?.contributions??[],entry={workspaceId:saved.hostId,accountId:user.sub,email:saved.ownerMember.email};if(contributions.some(c=>c.workspaceId===entry.workspaceId&&c.accountId===entry.accountId))break;if(contributions.length>=200)throw new HttpError(409,'Calendar contribution limit reached.');const body={contributions:[...contributions,entry],version:(current?.version??0)+1};if(await write(()=>target.compareAndSwap(current?.version??null,body,Number.MAX_SAFE_INTEGER-Date.now())))break;if(attempt===11)throw new HttpError(409,'Calendar contributions changed. Reload your connections.');}}
 
   if(calendarFlow){checkedHostResult(await write(()=>host.connectAccount({accountId:user.sub,email:user.email,tokens,credentialOwnerId,...(saved.ownerMember?{ownerMember:saved.ownerMember}:{})})));}
@@ -289,4 +291,21 @@ export async function oauthCallback(request,env) {
     return withLifecycleAdmission(env,id,index===0?'oauth_callback':'oauth_calendar',async context=>{contexts.push(context);try{return await enter(index+1);}finally{contexts.pop();}},{generation,cleanup:async error=>error instanceof HttpError&&error.status<500});
   };
   return enter(0);
+}
+
+// A new profile starts with the Google profile picture when Google serves a
+// small JPEG. Anything else falls back to initials; sign-in never waits long.
+export async function googlePicture(url,{fetchImpl=globalThis.fetch,timeoutMs=3000}={}){
+  try{
+    const u=new URL(url);if(u.protocol!=='https:'||!/(^|\.)googleusercontent\.com$/.test(u.hostname))return null;
+    u.pathname=u.pathname.replace(/=s\d+(-c)?$/,'');const sized=u.href.includes('=')?u.href:u.href+'=s192-c';
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+    try{
+      const r=await fetchImpl(sized,{signal:controller.signal,redirect:'manual'});
+      if(!r.ok||!/^image\/jpe?g/i.test(r.headers.get('content-type')??''))return null;
+      const bytes=new Uint8Array(await r.arrayBuffer());if(bytes.length>BRAND_IMAGES.avatarImage.maxBytes)return null;
+      let text='';for(const byte of bytes)text+=String.fromCharCode(byte);
+      return validateBrandImage('data:image/jpeg;base64,'+btoa(text),'avatarImage');
+    }finally{clearTimeout(timer);}
+  }catch{return null;}
 }

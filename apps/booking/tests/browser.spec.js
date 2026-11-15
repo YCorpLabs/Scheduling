@@ -35,7 +35,7 @@ test('host live preview and settings persist',async({page,request})=>{
   await page.goto(base+'/studio#link=intro');
   await page.getByLabel('What are we meeting about?').fill('A thoughtful demo');
   await expect(page.frameLocator('#preview').getByRole('heading',{name:'A thoughtful demo'})).toBeVisible();
-  await page.getByRole('button',{name:'Save changes'}).click();
+  await page.getByRole('button',{name:'Save changes',exact:true}).click();
   await expect(page.getByText('Saved · guest page updated')).toBeVisible();
   const after=await(await request.get(base+'/api/availability')).json();expect(after.config.title).toBe('A thoughtful demo');
   await request.post(base+'/api/settings',{headers:{Origin:base},data:before.config});
