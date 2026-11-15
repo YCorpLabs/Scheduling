@@ -227,3 +227,29 @@ test('the preview uses the person’s availability for "any time" links and hide
   const busy = [{ start: Date.UTC(2026, 10, 16, 8, 30), end: Date.UTC(2026, 10, 16, 8, 45) }];
   assert.deepEqual(previewSlots(draft, { availability, busy, now, days: 7 }).slots.map(s => new Date(s.start).toISOString()), ['2026-11-16T09:00:00.000Z']);
 });
+
+test('a busy event over the top of a block pushes its time label below the event', () => {
+  const s = { ...schedule(), weeklyHours: { ...workweek, 3: [{ start: 540, end: 720 }] } };
+  const planning = { start: zonedEpoch('2026-11-18', 540, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', 600, 'Europe/Oslo'), title: 'Planning' };
+  const later = { start: zonedEpoch('2026-11-18', 600, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', 630, 'Europe/Oslo'), title: 'Call' };
+  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [] }), /<span>09:00–12:00<\/span>/);
+  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [planning] }), /<span style="margin-top:40px">09:00–12:00<\/span>/, 'one hour down, 4px gap');
+  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [planning, later] }), /<span style="margin-top:62px">09:00–12:00<\/span>/, 'follows back-to-back events');
+  const midday = { start: zonedEpoch('2026-11-18', 660, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', 690, 'Europe/Oslo'), title: 'Lunch' };
+  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [midday] }), /<span>09:00–12:00<\/span>/, 'events lower in the block leave the label alone');
+});
+
+test('the link times dialog and the Availability page both count hours open next week', () => {
+  const link = availabilityPageMarkup({ schedule: schedule(), mode: 'every', monday: '2026-11-16', events: [], scope: 'link', title: 'Times for Intro', editable: true });
+  assert.match(link, /<b>40 hours<\/b>open next week/);
+  assert.doesNotMatch(link, /open this week/);
+});
+
+test('the approval hold picker is its own sentence, hidden until approval is on', () => {
+  const settings = { accounts: [], meetingTypes: [] };
+  const off = editorMarkup({ ...DEFAULT, id: 'x', title: 'Intro', slug: 'intro', requiresApproval: false }, { settings });
+  assert.match(off, /I approve each booking<\/label><\/p>\n<p data-approval-expiry hidden>Requests hold the time for <label/);
+  const on = editorMarkup({ ...DEFAULT, id: 'x', title: 'Intro', slug: 'intro', requiresApproval: true, approvalExpiryMinutes: 1440 }, { settings });
+  assert.match(on, /<p data-approval-expiry >Requests hold the time for .*<option value="1440" selected>1 day<\/option>.*?<\/select><\/p>/);
+  assert.doesNotMatch(on, / · requests/);
+});

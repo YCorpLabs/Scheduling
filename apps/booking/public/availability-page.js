@@ -30,7 +30,7 @@ export function availabilityPageMarkup(view) {
 }
 
 function panelMarkup(view) {
-  if (view.scope === 'link') return `<aside class="av-panel" aria-label="Link times"><div class="av-sum"><b>${hoursText(openMinutes(view.schedule, weekDates(addDays(view.monday, 0)), view.events))}</b>open this week</div><button type="button" class="secondary compact-button" data-use-availability>Use my availability</button></aside>`;
+  if (view.scope === 'link') return `<aside class="av-panel" aria-label="Link times"><div class="av-sum"><b>${hoursText(openMinutes(view.schedule, weekDates(addDays(mondayOf(todayKey(view.schedule.zone)), 7)), view.nextWeek?.events ?? []))}</b>open next week</div><button type="button" class="secondary compact-button" data-use-availability>Use my availability</button></aside>`;
   const accounts = view.accounts ?? [];
   const busy = accounts.length ? accounts.map(account => {
     const own = (view.calendars ?? []).filter(c => c.accountId === account.id);

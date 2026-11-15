@@ -185,7 +185,17 @@ export function weekMarkup({ schedule, mode = 'every', monday, events = [], toda
   }).join('')}</div>${anyAllDay ? `<div class="wk-allday"><div class="wk-gut"></div>${dates.map(key => `<div>${allDay.get(key).map(e => `<span class="wk-chip" style="--c:${esc(e.color || '#8a8a90')}" title="${esc(e.title || 'Busy')}">${esc(e.title || 'Busy')}</span>`).join('')}</div>`).join('')}</div>` : ''}
 <div class="wk-body" style="height:${height}px"><div class="wk-times" aria-hidden="true">${Array.from({ length: to - from }, (_, i) => `<span style="top:${i * hourHeight}px">${String(from + i).padStart(2, '0')}</span>`).join('')}</div>${dates.map(key => {
     const ranges = rangesFor(schedule, key, mode), offDay = mode === 'week' && hasOverride(schedule, key) && !ranges.length, past = mode === 'week' && today && key < today, canEdit = editable && !past;
-    return `<div class="wk-col${offDay ? ' offday' : ''}${past ? ' past' : ''}" data-col="${key}" role="group" aria-label="${esc(dayLabel(key))}">${ranges.map((r, i) => `<button type="button" class="wk-block" data-block="${i}" style="top:${minuteTop(r.start)}px;height:${minuteTop(r.end) - minuteTop(r.start)}px" aria-label="${esc(dayLabel(key))} ${rangeText(r)}${canEdit ? '. Remove' : ''}" ${canEdit ? '' : 'disabled'}><span>${rangeText(r)}</span>${canEdit ? '<i class="wk-handle" data-handle="start" aria-hidden="true"></i><i class="wk-handle" data-handle="end" aria-hidden="true"></i>' : ''}</button>`).join('')}${(placed.get(key) ?? []).map(e => `<div class="wk-event${e.booking ? ' wk-booked' : ''}" data-lane="${e.lane}" style="top:${minuteTop(e.top)}px;height:${Math.max(14, minuteTop(e.bottom) - minuteTop(e.top))}px;--c:${esc(e.color || '#8a8a90')}" title="${esc(e.title || 'Busy')} ${clock(e.top)}–${clock(Math.min(e.bottom, DAY_MINUTES))}">${esc(e.title || 'Busy')}</div>`).join('')}</div>`;
+    // Busy events drawn over the top of a block would hide its time label, so the label moves below them.
+    const dayEvents = placed.get(key) ?? [], labelRoom = Math.ceil(18 / hourHeight * 60);
+    const labelAt = r => {
+      let at = r.start;
+      for (let moved = true; moved;) {
+        moved = false;
+        for (const e of dayEvents) if (e.top <= at + labelRoom && e.bottom > at && e.bottom < r.end) { at = e.bottom; moved = true; }
+      }
+      return at;
+    };
+    return `<div class="wk-col${offDay ? ' offday' : ''}${past ? ' past' : ''}" data-col="${key}" role="group" aria-label="${esc(dayLabel(key))}">${ranges.map((r, i) => `<button type="button" class="wk-block" data-block="${i}" style="top:${minuteTop(r.start)}px;height:${minuteTop(r.end) - minuteTop(r.start)}px" aria-label="${esc(dayLabel(key))} ${rangeText(r)}${canEdit ? '. Remove' : ''}" ${canEdit ? '' : 'disabled'}>${(() => { const shift = minuteTop(labelAt(r)) - minuteTop(r.start); return `<span${shift > 0 ? ` style="margin-top:${Math.round(shift - 4)}px"` : ''}>${rangeText(r)}</span>`; })()}${canEdit ? '<i class="wk-handle" data-handle="start" aria-hidden="true"></i><i class="wk-handle" data-handle="end" aria-hidden="true"></i>' : ''}</button>`).join('')}${(placed.get(key) ?? []).map(e => `<div class="wk-event${e.booking ? ' wk-booked' : ''}" data-lane="${e.lane}" style="top:${minuteTop(e.top)}px;height:${Math.max(14, minuteTop(e.bottom) - minuteTop(e.top))}px;--c:${esc(e.color || '#8a8a90')}" title="${esc(e.title || 'Busy')} ${clock(e.top)}–${clock(Math.min(e.bottom, DAY_MINUTES))}">${esc(e.title || 'Busy')}</div>`).join('')}</div>`;
   }).join('')}</div></div>`;
 }
 
