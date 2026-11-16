@@ -55,11 +55,38 @@ async function dnsAddresses(host,fetcher){
 }
 export async function signature(secret,timestamp,body){const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);const bytes=new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(timestamp+'.'+body)));return 'v1='+[...bytes].map(n=>n.toString(16).padStart(2,'0')).join('');}
 const plain=value=>String(value??'').replace(/@/g,'＠').replace(/</g,'‹').replace(/>/g,'›').slice(0,600);
+// Slack and Discord messages: a readable title, the time in each reader's own zone and, only when
+// opted in, the guest. Guest and title strings never become links, mentions or formatting.
+const EVENT_TITLES={'booking.requested':'Booking requested','booking.confirmed':'Booking confirmed','booking.rescheduled':'Booking rescheduled','booking.cancelled':'Booking cancelled','booking.approval_requested':'Approval needed','booking.rejected':'Request declined','booking.expired':'Request expired','integration.test':'Test notification'};
+const EVENT_COLORS={'booking.requested':0xc98a1b,'booking.confirmed':0x2f8f5b,'booking.rescheduled':0x3a7afe,'booking.cancelled':0xb23d35,'booking.approval_requested':0xc98a1b,'booking.rejected':0xb23d35,'booking.expired':0x8b8d93,'integration.test':0x5865f2};
+const eventTitle=type=>EVENT_TITLES[type]||String(type||'Booking update').replace(/^booking\./,'').replace(/_/g,' ');
+const epoch=value=>{const ms=typeof value==='string'?Date.parse(value):value;return Number.isFinite(ms)?Math.floor(ms/1000):null;};
+const utc=seconds=>new Date(seconds*1000).toISOString().slice(0,16).replace('T',' ')+' UTC';
+const short=value=>String(value??'').replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,200);
+// Slack: & < > are the only control characters in mrkdwn; verbatim stops auto-linking and mentions.
+const slackSafe=value=>short(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/@/g,'＠');
+// Discord renders markdown, masked links and bare URLs even from webhooks; escape every ASCII
+// punctuation mark and break URL schemes so a guest name stays plain text.
+const discordSafe=value=>short(value).replace(/:\/\//g,':​//').replace(/[!-\/:-@\[-`{-~]/g,'\\$&');
+function when(kind,start,end){
+ const s=epoch(start),e=epoch(end);if(s===null)return '';
+ if(kind==='slack')return `<!date^${s}^{date_short_pretty} at {time}|${utc(s)}>`+(e!==null?` – <!date^${e}^{time}|${utc(e).slice(11)}>`:'');
+ return `<t:${s}:F>`+(e!==null?` – <t:${e}:t>`:'');
+}
 export function adapterPayload(kind,event){
  if(kind==='webhook')return event;
- const b=event.booking||{},text=[event.type.replace(/^booking\./,'').replace(/_/g,' '),b.title,b.start?new Date(b.start).toISOString():null,event.guest?`${event.guest.name} · ${event.guest.email}`:null].filter(Boolean).map(plain).join('\n');
- if(kind==='slack')return {text,parse:'none',link_names:false,unfurl_links:false,unfurl_media:false,blocks:[{type:'section',text:{type:'plain_text',text,emoji:false}}]};
- return {content:text,allowed_mentions:{parse:[]}};
+ const b=event.booking||{},test=event.type==='integration.test',title=eventTitle(event.type),guest=event.guest?[event.guest.name,event.guest.email].map(short).filter(Boolean):[];
+ const time=test?'':when(kind,b.start,b.end),previous=event.previousBooking?when(kind,event.previousBooking.start,event.previousBooking.end):'';
+ if(kind==='slack'){
+  const blocks=[{type:'section',text:{type:'mrkdwn',verbatim:true,text:`*${title}*${test?'\nBooking updates will appear in this channel.':b.title?'\n'+slackSafe(b.title):''}`}}];
+  if(time)blocks.push({type:'context',elements:[{type:'mrkdwn',verbatim:true,text:time+(previous?`  ·  was ${previous}`:'')}]});
+  if(guest.length)blocks.push({type:'context',elements:[{type:'plain_text',emoji:false,text:guest.join(' · ').replace(/</g,'‹').replace(/>/g,'›')}]});
+  // The notification preview carries no guest details.
+  return {text:plain(test||!b.title?title:`${title}: ${b.title}`),parse:'none',link_names:false,unfurl_links:false,unfurl_media:false,blocks};
+ }
+ const embed={title,color:EVENT_COLORS[event.type]??0x8b8d93,description:test?'Booking updates will appear in this channel.':[b.title?`**${discordSafe(b.title)}**`:'',time,previous?`Was ${previous}`:''].filter(Boolean).join('\n')};
+ if(guest.length)embed.fields=[{name:'Guest',value:guest.map(discordSafe).join('\n')}];
+ return {embeds:[embed],allowed_mentions:{parse:[]}};
 }
 function eventTypes(b,previous){
  const types=[];if(!previous)types.push('booking.requested');
@@ -136,7 +163,11 @@ export class IntegrationOutbox{
   if(this.ledger.maintenanceFrozen())return refusal('Outbound integrations are paused for maintenance.',503,'maintenance_frozen');
   const c=this.config(data?.id);if(!c)return refusal('Integration not found.',404,'integration_not_found');if(!c.enabled)return refusal('Enable the integration before testing.',409,'integration_disabled');
   const now=Date.now(),event={schemaVersion:1,id:randomToken(24),type:'integration.test',occurredAt:new Date(now).toISOString(),workspaceId:this.ledger.hostId(),booking:{title:'Integration test',start:now+3600000,end:now+5400000,status:'test'}};
-  const job=this.enqueue(c,event);await this.ledger.wake();return {ok:true,deliveryId:job.id,state:job.state};
+  // Someone is waiting on a test, so it is sent in this request through the normal delivery path
+  // (lease, cooldown, DNS and host checks) instead of on the next alarm. Booking events keep their schedule.
+  const job=this.enqueue(c,event);if(job.state==='queued'){try{await this.process(job.id);}catch{}}
+  await this.ledger.wake();const sent=this.delivery(job.id)||job;
+  return {ok:true,deliveryId:job.id,state:sent.state,...(sent.errorCode?{errorCode:sent.errorCode}:{})};
  }
  async retry(data){
   const j=this.delivery(data?.deliveryId);if(!j)return refusal('Delivery not found.',404,'delivery_not_found');

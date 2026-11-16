@@ -158,32 +158,65 @@ test('members and viewers get read-only company access with no admin settings',a
 
 test('integrations: write-only URL, webhook host gate, one-time secret, test, retry and discard',async({page})=>{
   const state=await mock(page);await page.goto(base+'/studio#link=intro');await page.getByRole('button',{name:'Integrations'}).click();
-  await expect(page.locator('.integration-connect')).toHaveCount(3);await expect(page.getByRole('button',{name:'Add integration',exact:true})).toHaveCount(0);await page.getByRole('button',{name:'Connect Slack',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'Add integration'});await expect(dialog.getByRole('radio',{name:'Slack'})).toBeChecked();
-  await dialog.locator('label.kind-option',{hasText:'Webhook'}).click();await expect(dialog.getByText('Custom webhooks are not available.',{exact:false})).toBeVisible();await expect(dialog.getByRole('button',{name:'Add integration',exact:true})).toBeDisabled();
-  await dialog.locator('label.kind-option',{hasText:'Slack'}).click();await expect(dialog.getByRole('button',{name:'Add integration',exact:true})).toBeEnabled();
-  await expect(dialog.getByText('Include guest name and email')).toBeVisible();await expect(dialog.getByText(/answers are never sent/)).toBeVisible();
-  await dialog.getByLabel('Name',{exact:true}).fill('Ops');await dialog.getByRole('button',{name:'Add integration',exact:true}).click();await expect(dialog.getByText('Enter the destination URL.')).toBeVisible();await expect(dialog.getByLabel('Slack webhook URL')).toBeFocused();
-  await dialog.getByLabel('Slack webhook URL').fill('https://hooks.slack.com/services/T0/B0/secretpart');await page.setViewportSize({width:1280,height:1000});await page.screenshot({path:`${shots}/integration-editor.png`});
-  await dialog.getByRole('button',{name:'Add integration',exact:true}).click();await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.integration-choice')).toHaveCount(3);await expect(page.getByRole('button',{name:'Add integration',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Connect Webhook',exact:true})).toHaveCount(0);await expect(page.locator('.integration-choice.is-unavailable')).toContainText('Not available on this service');
+  await page.getByRole('button',{name:'Connect Slack',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Connect Slack'});await expect(dialog.getByLabel('Slack webhook URL')).toBeFocused();await expect(dialog.getByLabel('Name',{exact:true})).toHaveValue('Slack');
+  await expect(dialog.getByText('Include guest name and email')).toBeVisible();
+  await expect(dialog.locator('[data-events-summary]')).toHaveText('Confirmed, cancelled');await expect(dialog.getByRole('checkbox',{name:'Confirmed'})).toBeHidden();
+  await expect(dialog.getByRole('link',{name:'Create an incoming webhook in Slack'})).toHaveAttribute('rel','noopener noreferrer');
+  await dialog.getByLabel('Name',{exact:true}).fill('Ops');await dialog.getByRole('button',{name:'Connect',exact:true}).click();
+  await expect(dialog.getByText('Paste the Slack webhook URL.')).toBeVisible();await expect(dialog.getByLabel('Slack webhook URL')).toBeFocused();await expect(dialog.getByLabel('Slack webhook URL')).toHaveAttribute('aria-invalid','true');
+  await dialog.getByLabel('Slack webhook URL').fill('https://hooks.slack.com/services/T0/B0/secretpart');await expect(dialog.getByLabel('Slack webhook URL')).not.toHaveAttribute('aria-invalid','true');
+  await dialog.getByRole('button',{name:'Connect',exact:true}).click();await expect(dialog.getByText('This isn’t a Slack incoming webhook URL.')).toBeVisible();
+  expect(state.requests.some(r=>r.path==='/api/live/integrations'&&r.method==='POST')).toBe(false);
+  await dialog.getByLabel('Slack webhook URL').fill('https://hooks.slack.com/services/T0123456/B0123456/secretpartsecretpart');await page.setViewportSize({width:1280,height:1000});await page.screenshot({path:`${shots}/integration-editor.png`});
+  await dialog.getByRole('button',{name:'Connect',exact:true}).click();await expect(dialog).toHaveCount(0);
+  const connected=page.getByRole('dialog',{name:'Ops is connected'});await expect(connected.getByRole('button',{name:'Send test'})).toBeFocused();await connected.getByRole('button',{name:'Done'}).click();await expect(connected).toHaveCount(0);await expect(page.getByRole('button',{name:'Edit Ops'})).toBeFocused();
   const created=state.requests.find(r=>r.path==='/api/live/integrations'&&r.method==='POST').body;expect(created).toMatchObject({action:'create',kind:'slack',name:'Ops',events:['booking.confirmed','booking.cancelled'],includeGuestDetails:false,enabled:true});
-  await expect(page.locator('.integration-row')).toContainText('hooks.slack.com');expect(await page.content()).not.toContain('secretpart');
-  await page.getByRole('button',{name:'Send test notification to Ops'}).click();await expect(page.locator('#host-status')).toHaveText('Test notification queued');await expect(page.locator('.delivery-entry')).toContainText('Test notification');
-  await page.getByRole('button',{name:'Pause Ops'}).click();await expect(page.getByRole('button',{name:'Resume Ops'})).toBeFocused();expect(state.requests.filter(r=>r.body?.action==='update').at(-1).body).toMatchObject({id:'i1',enabled:false,expectedRevision:1});
+  await expect(page.locator('.integration-row')).toContainText('Slack · Confirmed, cancelled');await expect(page.getByRole('button',{name:'Add integration',exact:true})).toBeVisible();expect(await page.content()).not.toContain('secretpart');
+  await expect(page.locator('.integration-row .pill')).toHaveCount(0);
+  await page.getByRole('button',{name:'More for Ops'}).click();await expect(page.getByRole('menuitem')).toHaveText(['Send test','Edit','Turn off','Remove…']);await page.getByRole('menuitem',{name:'Send test'}).click();
+  await expect(page.locator('#host-status')).toHaveText('Test notification queued');await expect(page.locator('.delivery-entry')).toContainText('Test notification');await expect(page.getByRole('button',{name:'More for Ops'})).toBeFocused();
+  await page.getByRole('button',{name:'More for Ops'}).click();await page.getByRole('menuitem',{name:'Turn off'}).click();
+  await expect(page.getByRole('button',{name:'Turn on Ops'})).toBeFocused();expect(state.requests.filter(r=>r.body?.action==='update').at(-1).body).toMatchObject({id:'i1',enabled:false,expectedRevision:1});
+  await expect(page.locator('.integration-row.off .pill')).toHaveText('Off');await expect(page.locator('#host-status')).toHaveText('Ops is off');
+  await page.getByRole('button',{name:'More for Ops'}).click();await expect(page.getByRole('menuitem')).toHaveText(['Turn on','Edit','Remove…']);await page.keyboard.press('Escape');
   // generic webhook with approved hosts returns a one-time secret
-  state.hostsReady=true;await page.getByRole('button',{name:'Integrations'}).click();await page.locator('#add-integration').click();const hook=page.getByRole('dialog',{name:'Add integration'});
-  await hook.locator('label.kind-option',{hasText:'Webhook'}).click();await expect(hook.getByText(/approved by the service operator/)).toBeVisible();await hook.getByLabel('Name',{exact:true}).fill('CRM');await hook.getByLabel('Endpoint URL').fill('https://crm.example/hooks');await hook.getByRole('button',{name:'Add integration',exact:true}).click();
-  const secret=page.getByRole('dialog',{name:'Signing secret'});await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveAttribute('type','password');await secret.getByRole('button',{name:'Reveal'}).click();await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveValue('whsec_test_only_value');
-  await page.screenshot({path:`${shots}/integration-secret.png`});await secret.getByRole('button',{name:'Done'}).click();await expect(page.locator('dialog')).toHaveCount(0);
+  state.hostsReady=true;await page.getByRole('button',{name:'Integrations'}).click();await page.getByRole('button',{name:'Add integration',exact:true}).click();await expect(page.getByRole('menuitem')).toHaveText(['Slack','Discord','Webhook']);await page.getByRole('menuitem',{name:'Webhook'}).click();const hook=page.getByRole('dialog',{name:'Connect Webhook'});
+  await hook.getByLabel('Name',{exact:true}).fill('CRM');await hook.getByLabel('Endpoint URL').fill('https://crm.example/hooks');await hook.getByRole('button',{name:'Connect',exact:true}).click();
+  const secret=page.getByRole('dialog',{name:'Signing secret'});await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveAttribute('type','password');await expect(secret.getByRole('button',{name:'Copy'})).toBeFocused();await secret.getByRole('button',{name:'Reveal'}).click();await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveValue('whsec_test_only_value');
+  await page.screenshot({path:`${shots}/integration-secret.png`});await secret.getByRole('button',{name:'Done'}).click();await expect(page.locator('dialog')).toHaveCount(0);await expect(page.getByRole('button',{name:'Edit CRM'})).toBeFocused();
   expect(await page.evaluate(()=>JSON.stringify({...localStorage})+JSON.stringify({...sessionStorage}))).not.toContain('whsec');expect(await page.content()).not.toContain('whsec');
   state.deliveries.push({id:'dfail',integrationId:'i2',eventId:'e2',eventType:'booking.confirmed',state:'failed',attempts:4,nextAttemptAt:null,lastAttemptAt:Date.now()-60000,errorCode:'provider_rejected'},{id:'dheld',integrationId:'i2',eventId:'e3',eventType:'booking.cancelled',state:'quarantined',attempts:1,nextAttemptAt:null,lastAttemptAt:Date.now()-120000,errorCode:'restored'});
   await page.getByRole('button',{name:'Integrations'}).click();await expect(page.getByText('1 delivery is held after a restore')).toBeVisible();
+  const crm=page.locator('.integration-row',{hasText:'CRM'});await expect(crm.locator('.pill')).toHaveText('Failing');await expect(crm.locator('.integration-problem')).toHaveText('Rejected by the destination. Check the URL.');
+  await expect(crm.getByRole('button',{name:'Send test notification to CRM'})).toBeVisible();await expect(page.locator('.integration-row',{hasText:'Ops'}).locator('.integration-problem')).toHaveCount(0);
+  await expect(page.locator('.integration-log > summary')).toContainText('2 need attention');
   await page.getByRole('button',{name:'Retry Booking confirmed'}).click();await expect(page.locator('#host-status')).toHaveText('Delivery queued for retry');
   await page.getByRole('button',{name:'Discard Booking cancelled'}).click();const discard=page.getByRole('dialog',{name:'Discard this delivery?'});await expect(discard).toContainText('will not be sent or replayed');await discard.getByRole('button',{name:'Discard delivery'}).click();
   await expect(page.getByText('held after a restore')).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/live/integrations/retry').map(r=>r.body)).toEqual([{deliveryId:'dfail'},{deliveryId:'dheld',action:'discard'}]);
   await page.screenshot({path:`${shots}/integrations-list.png`,fullPage:true});
   await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark mode'}).click();await page.screenshot({path:`${shots}/integrations-dark.png`,fullPage:true});
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integrations-mobile.png`,fullPage:true});
+});
+
+test('integration edits keep the saved URL unless replaced, and removal needs a confirmation',async({page})=>{
+  const state=await mock(page,{companies:false});state.hostsReady=true;
+  state.integrations=[{id:'i1',kind:'webhook',name:'CRM',enabled:true,events:['booking.confirmed'],includeGuestDetails:false,destinationLabel:'crm.example',revision:3}];
+  await page.goto(base+'/studio#integrations');await page.getByRole('button',{name:'Edit CRM'}).click();
+  const edit=page.getByRole('dialog',{name:'Edit CRM'});await expect(edit.getByLabel('Name',{exact:true})).toBeFocused();await expect(edit.getByText('crm.example')).toBeVisible();await expect(edit.getByLabel('New URL')).toBeHidden();
+  await edit.getByRole('button',{name:'Replace URL'}).click();await expect(edit.getByLabel('New URL')).toBeFocused();await edit.getByRole('button',{name:'Keep current URL'}).click();await expect(edit.getByLabel('New URL')).toBeHidden();
+  await edit.getByLabel('Name',{exact:true}).fill('CRM sync');await edit.locator('summary',{hasText:'Send when'}).click();await edit.getByRole('checkbox',{name:'Confirmed'}).click();await expect(edit.locator('[data-events-summary]')).toHaveText('No events');
+  await edit.locator('summary',{hasText:'Send when'}).click();await edit.getByRole('button',{name:'Save changes'}).click();await expect(edit.getByText('Choose at least one event.')).toBeVisible();await expect(edit.getByRole('checkbox',{name:'Requested'})).toBeFocused();
+  await edit.getByRole('checkbox',{name:'Confirmed'}).click();await edit.getByRole('checkbox',{name:'Rescheduled'}).click();await expect(edit.locator('[data-events-summary]')).toHaveText('Confirmed, rescheduled');await edit.getByRole('button',{name:'Save changes'}).click();await expect(edit).toHaveCount(0);
+  const saved=state.requests.filter(r=>r.body?.action==='update').at(-1).body;expect(saved).toMatchObject({id:'i1',name:'CRM sync',events:['booking.confirmed','booking.rescheduled'],enabled:true,expectedRevision:3});expect('url' in saved).toBe(false);
+  await expect(page.locator('.integration-row')).toContainText('Webhook · crm.example · Confirmed, rescheduled');await expect(page.getByRole('button',{name:'Edit CRM sync'})).toBeFocused();
+  await page.getByRole('button',{name:'More for CRM sync'}).click();await expect(page.getByRole('menuitem')).toHaveText(['Send test','Edit','Turn off','Remove…']);await page.getByRole('menuitem',{name:'Remove…'}).click();
+  const remove=page.getByRole('dialog',{name:'Remove CRM sync'});await expect(remove).toContainText('CRM sync stops receiving booking updates.');await remove.getByRole('button',{name:'Cancel'}).click();await expect(remove).toHaveCount(0);
+  expect(state.requests.some(r=>r.body?.action==='remove')).toBe(false);
+  await page.getByRole('button',{name:'More for CRM sync'}).click();await page.getByRole('menuitem',{name:'Remove…'}).click();await page.getByRole('dialog',{name:'Remove CRM sync'}).getByRole('button',{name:'Remove integration'}).click();
+  await expect(page.locator('.integration-row:not(.integration-choice)')).toHaveCount(0);await expect(page.locator('.integration-choice')).toHaveCount(3);expect(state.requests.filter(r=>r.body?.action==='remove').at(-1).body).toMatchObject({id:'i1',expectedRevision:4});await expect(page.getByRole('button',{name:'Connect Slack'})).toBeFocused();
 });
 
 test('signed-out invite keeps the token out of URLs, survives sign-in and needs explicit acceptance',async({page})=>{
@@ -278,16 +311,39 @@ test('profile creation accepts a person name and rejects credential-bearing webs
   await dialog.getByLabel('Website',{exact:false}).fill('');await dialog.getByRole('button',{name:'Create team',exact:true}).click();await expect(switcher(page)).toContainText('Riley');
 });
 
+test('a test notification reports its outcome without a manual refresh and keeps focus',async({page})=>{
+  const state=await mock(page,{companies:false});state.integrations=[{id:'i1',kind:'slack',name:'Ops',enabled:true,events:['booking.confirmed'],includeGuestDetails:false,destinationLabel:'hooks.slack.com',revision:1}];
+  await page.goto(base+'/studio#integrations');await page.getByRole('button',{name:'More for Ops'}).click();await page.getByRole('menuitem',{name:'Send test'}).click();await expect(page.locator('#host-status')).toHaveText('Test notification queued');
+  Object.assign(state.deliveries[0],{state:'delivered',attempts:1,lastAttemptAt:Date.now()});
+  await expect(page.locator('#host-status')).toHaveText('Test delivered to Ops',{timeout:8000});await expect(page.locator('.delivery-entry .booking-badge')).toHaveText('Delivered');
+  await expect(page.getByRole('button',{name:'More for Ops'})).toBeFocused();
+  const reads=()=>state.requests.filter(r=>r.path==='/api/live/integrations'&&r.method==='GET').length,before=reads();
+  await page.locator('summary',{hasText:'Recent deliveries'}).click();await expect.poll(reads).toBe(before+1);await expect(page.locator('.delivery-entry').first()).toBeVisible();await expect(page.locator('#deliveries-title')).toBeFocused();
+});
+
+test('right after connecting, a test message reports delivery in the dialog and Escape still closes it',async({page})=>{
+  const state=await mock(page,{companies:false});await page.goto(base+'/studio#integrations');await page.getByRole('button',{name:'Connect Discord',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Connect Discord'});await dialog.getByLabel('Discord webhook URL').fill('https://discord.com/api/webhooks/123456789/abcdefghijklmnopqrstuvwxyz');await dialog.getByRole('button',{name:'Connect',exact:true}).click();
+  const connected=page.getByRole('dialog',{name:'Discord is connected'});await connected.getByRole('button',{name:'Send test'}).click();await expect(connected.getByRole('status')).toHaveText('Sending…');
+  await expect.poll(()=>state.deliveries.length).toBe(1);Object.assign(state.deliveries[0],{state:'failed',attempts:1,lastAttemptAt:Date.now(),errorCode:'provider_rejected'});
+  await expect(connected.getByRole('status')).toHaveText('Not delivered: Rejected by the destination. Check the URL.',{timeout:8000});await expect(connected.getByRole('button',{name:'Send again'})).toBeEnabled();
+  await page.screenshot({path:`${shots}/integration-connected-test.png`});
+  await expect(page.locator('.integration-row .integration-problem')).toHaveText('Rejected by the destination. Check the URL.');
+  // While the result is still pending, Escape closes the dialog.
+  await connected.getByRole('button',{name:'Send again'}).click();await expect.poll(()=>state.deliveries.length).toBe(2);
+  await expect(async()=>{await page.keyboard.press('Escape');await expect(connected).toHaveCount(0,{timeout:250});}).toPass({timeout:5000});
+});
+
 test('integration cards open the selected destination with the webhook gate intact',async({page})=>{
-  await mock(page,{companies:false});await page.goto(base+'/studio#integrations');await expect(page.locator('.integration-connect')).toHaveCount(3);
+  await mock(page,{companies:false});await page.goto(base+'/studio#integrations');await expect(page.locator('.integration-choice')).toHaveCount(3);
   await page.setViewportSize({width:1440,height:960});await page.screenshot({path:`${shots}/integration-catalog-desktop.png`});
-  for(const kind of ['Discord','Webhook']){
-    await page.getByRole('button',{name:'Connect '+kind,exact:true}).click();const dialog=page.getByRole('dialog',{name:'Add integration'});
-    await expect(dialog.getByRole('radio',{name:kind,exact:true})).toBeChecked();
-    if(kind==='Webhook')await expect(dialog.getByRole('button',{name:'Add integration',exact:true})).toBeDisabled();
+  for(const kind of ['Slack','Discord']){
+    await page.getByRole('button',{name:'Connect '+kind,exact:true}).click();const dialog=page.getByRole('dialog',{name:'Connect '+kind});
+    await expect(dialog.getByLabel(kind+' webhook URL')).toBeFocused();await expect(dialog.getByRole('link',{name:new RegExp(kind)})).toHaveAttribute('target','_blank');
     await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Connect '+kind,exact:true})).toBeFocused();
   }
-  await page.setViewportSize({width:390,height:844});await page.locator('[data-more]').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.locator('.integration-connect')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
+  await expect(page.getByRole('button',{name:'Connect Webhook',exact:true})).toHaveCount(0);await expect(page.locator('.integration-choice.is-unavailable')).toContainText('Webhook');
+  await page.setViewportSize({width:390,height:844});await page.locator('[data-more]').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.locator('.integration-choice')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
 });
 
 test('an image still decoding cannot be applied to a profile selected afterwards',async({page})=>{

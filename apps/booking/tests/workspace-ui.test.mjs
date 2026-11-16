@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {resolveWorkspaces,sectionsFor,can,canManageMember,inviteRoles,captureInviteToken,teamMarkup} from '../public/workspace-ui.js';
-import {integrationPayload,validateIntegration,eventCatalog,deliveryStateLabel,canRetry,errorLabel,integrationsMarkup,webhookHostsReady} from '../public/integrations-ui.js';
+import {integrationPayload,validateIntegration,eventCatalog,eventGroups,eventSummary,deliveryStateLabel,canRetry,errorLabel,integrationsMarkup,integrationsHeading,webhookHostsReady,integrationHealth,testStatus} from '../public/integrations-ui.js';
+import {validateDestination} from '../src/integrations.js';
 
 const caps=role=>({manageSettings:['owner','admin'].includes(role),manageMembers:['owner','admin'].includes(role),manageIntegrations:['owner','admin'].includes(role),approveBookings:role!=='viewer',transferOwnership:role==='owner',grantAdmin:role==='owner'});
 const listing={workspaces:[{id:'h_me',name:'Personal',role:'owner',personal:true},{id:'h_acme',name:'Acme',role:'admin',personal:false,capabilities:caps('admin')}],activeWorkspaceId:'h_me'};
@@ -53,6 +54,38 @@ test('delivery states and catalog match the backend contract',()=>{
   assert.deepEqual(eventCatalog({capabilities:{events:['booking.confirmed','booking.expired']}}).map(e=>e.label),['Booking confirmed','Request expired']);
   assert.equal(deliveryStateLabel('in_flight'),'Sending');assert.equal(canRetry({state:'failed'}),true);assert.equal(canRetry({state:'quarantined'}),false);
   assert.match(errorLabel('provider_rejected'),/Rejected/);
-  const html=integrationsMarkup({integrations:[{id:'i1',kind:'slack',name:'Ops',enabled:true,events:['booking.confirmed'],includeGuestDetails:true,destinationLabel:'hooks.slack.com',revision:2}],deliveries:[{id:'d1',integrationId:'i1',eventType:'booking.confirmed',state:'failed',attempts:3,lastAttemptAt:1,errorCode:'provider_rejected'}]},{formatTime:()=>'t'});
-  assert.match(html,/hooks\.slack\.com/);assert.match(html,/data-retry-delivery="d1"/);assert.doesNotMatch(html,/https:\/\//);assert.doesNotMatch(html,/answers/i);
+  const html=integrationsMarkup({integrations:[{id:'i1',kind:'slack',name:'Ops',enabled:true,events:['booking.confirmed'],includeGuestDetails:true,destinationLabel:'hooks.slack.com',revision:2},{id:'i2',kind:'webhook',name:'CRM',enabled:false,events:['booking.confirmed'],includeGuestDetails:false,destinationLabel:'crm.example',revision:1}],deliveries:[{id:'d1',integrationId:'i1',eventType:'booking.confirmed',state:'failed',attempts:3,lastAttemptAt:1,errorCode:'provider_rejected'}]},{formatTime:()=>'t'});
+  assert.match(html,/Slack · Confirmed · Shares guest details/);assert.match(html,/crm\.example/);assert.match(html,/data-retry-delivery="d1"/);assert.match(html,/<span class="pill off">Off<\/span>/);assert.match(html,/<span class="pill bad">Failing<\/span>/);assert.match(html,/integration-problem">Rejected by the destination/);assert.match(html,/data-toggle-integration="i2"/);
+  assert.doesNotMatch(html,/data-test-integration="i2"/);assert.doesNotMatch(html,/https:\/\//);assert.doesNotMatch(html,/answers/i);
+});
+test('the editor groups events and rows summarise them in words',()=>{
+  const catalog=eventCatalog({capabilities:{events:['booking.requested','booking.confirmed','booking.rescheduled','booking.cancelled','booking.approval_requested','booking.rejected','booking.expired','booking.future']}});
+  assert.deepEqual(eventGroups(catalog).map(g=>[g.label,g.events.map(e=>e.label)]),[['Bookings',['Requested','Confirmed','Rescheduled','Cancelled']],['Approvals',['Needs approval','Declined','Expired']],['Other',['booking.future']]]);
+  assert.equal(eventSummary(['booking.cancelled','booking.confirmed'],catalog),'Confirmed, cancelled');
+  assert.equal(eventSummary(catalog.map(e=>e.id),catalog),'All events');
+  assert.equal(eventSummary(['booking.requested','booking.confirmed','booking.cancelled','booking.expired'],catalog),'4 events');
+});
+test('the catalog shows the webhook gate and the integration limit instead of a dead-end form',()=>{
+  const base={integrations:[],deliveries:[]};
+  assert.match(integrationsMarkup(base,{formatTime:String}),/is-unavailable" data-choice="webhook"[^]*Not available on this service/);
+  assert.match(integrationsMarkup({...base,status:{customWebhookHostsConfigured:true}},{formatTime:String}),/data-add-integration data-kind="webhook"/);
+  const full=integrationsMarkup({...base,integrations:[{id:'i1',kind:'slack',name:'A',enabled:true,events:['booking.confirmed']}],limits:{integrations:1},status:{customWebhookHostsConfigured:true}},{formatTime:String});
+  assert.doesNotMatch(full,/data-add-integration/);assert.equal(integrationsHeading({integrations:[{id:'i1'}],limits:{integrations:1}}),'');assert.match(integrationsHeading({integrations:[{id:'i1'}]}),/Add integration/);assert.equal(integrationsHeading({integrations:[]}),'');assert.match(full,/Limit of 1 reached/);
+});
+test('URL checks in the editor agree with the Worker for Slack and Discord',()=>{
+  const cases=[['slack','https://hooks.slack.com/services/T0123456/B0123456/abcdefghijklmnop'],['slack','https://hooks.slack.com/services/T0/B0/short'],['slack','https://hooks.slack.com/services/T0123456/B0123456/abcdefghijklmnop?x=1'],['slack','https://slack.com/services/T0123456/B0123456/abcdefghijklmnop'],['slack','https://hooks.slack.com:8443/services/T0123456/B0123456/abcdefghijklmnop'],
+    ['discord','https://discord.com/api/webhooks/123456789/abcdefghijklmnopqrstuvwxyz'],['discord','https://discord.com/api/v10/webhooks/123456789/abcdefghijklmnopqrstuvwxyz'],['discord','https://discordapp.com/api/webhooks/123456789/abcdefghijklmnopqrstuvwxyz'],['discord','https://discord.com/api/webhooks/abc/abcdefghijklmnopqrstuvwxyz'],['discord','http://discord.com/api/webhooks/123456789/abcdefghijklmnopqrstuvwxyz']];
+  for(const [kind,url] of cases){
+    const ui=validateIntegration({action:'create',kind,name:'N',url,events:['booking.confirmed']},{requireUrl:true})===null;
+    let worker=true;try{validateDestination(url,kind,{});}catch{worker=false;}
+    assert.equal(ui,worker,`${kind} ${url}`);
+  }
+  assert.equal(validateIntegration({action:'create',kind:'slack',name:'',url:'https://hooks.slack.com/services/T0123456/B0123456/abcdefghijklmnop',events:['booking.confirmed']},{requireUrl:true}).field,'name');
+});
+test('rows flag only a failing or retrying newest delivery, and test results read plainly',()=>{
+  const ds=[{integrationId:'a',state:'cancelled'},{integrationId:'a',state:'failed',errorCode:'provider_rejected'},{integrationId:'b',state:'delivered'},{integrationId:'b',state:'failed'},{integrationId:'c',state:'retry',errorCode:'rate_limited'}];
+  assert.deepEqual(integrationHealth('a',ds),{tone:'failed',label:'Failing',text:'Last delivery failed: Rejected by the destination. Check the URL.'});
+  assert.equal(integrationHealth('b',ds),null);assert.equal(integrationHealth('c',ds).tone,'retry');assert.equal(integrationHealth('d',ds),null);
+  assert.equal(testStatus({state:'delivered'},'Ops'),'Test delivered to Ops');assert.equal(testStatus({state:'failed',errorCode:'provider_rejected'},'Ops'),'Test to Ops failed. Rejected by the destination. Check the URL.');
+  assert.equal(testStatus({state:'failed',errorCode:'queue_capacity'},'Ops'),'Test notification could not be queued');assert.equal(testStatus({state:'queued'},'Ops'),'Test notification queued');
 });
