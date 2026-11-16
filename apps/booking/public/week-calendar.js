@@ -1,5 +1,6 @@
 // Availability as a week calendar: drag on empty space to add hours, drag an
-// edge to resize, click a block to remove it. Real calendar events sit
+// edge to resize, drag a block to move it to another time or day, click a
+// block to remove it. Real calendar events sit
 // underneath. Works on one schedule {zone, weeklyHours, dateOverrides}, either
 // "Every week" (weeklyHours) or "This week only" (dateOverrides).
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -90,6 +91,13 @@ export function rangesFor(schedule, key, mode) {
 export function withRanges(schedule, key, mode, ranges) {
   if (mode === 'every') return { ...schedule, weeklyHours: { ...schedule.weeklyHours, [weekdayOf(key)]: normalize(ranges) } };
   return { ...schedule, dateOverrides: { ...overrides(schedule), [key]: normalize(ranges) } };
+}
+/** Moves one block to a new time, on the same day or another day of the view. */
+export function moveRange(schedule, mode, fromKey, index, toKey, range) {
+  const source = rangesFor(schedule, fromKey, mode);
+  if (fromKey === toKey) return withRanges(schedule, fromKey, mode, replaceRange(source, index, range));
+  const without = withRanges(schedule, fromKey, mode, removeRange(source, index));
+  return withRanges(without, toKey, mode, addRange(rangesFor(without, toKey, mode), range));
 }
 export function useUsualHours(schedule, key) {
   const next = { ...overrides(schedule) };
@@ -207,7 +215,7 @@ export function weekMarkup({ schedule, mode = 'every', monday, events = [], toda
 export function bindWeek(root, { schedule, mode, onChange, onDay, editable = true, coarse = matchMedia?.('(pointer: coarse)').matches }) {
   const grid = root.querySelector('[data-week]');
   if (!grid) return () => {};
-  const from = Number(grid.dataset.from), hourHeight = 44;
+  const from = Number(grid.dataset.from), to = Number(grid.dataset.to), hourHeight = 44;
   const minuteAt = (col, clientY) => snap(from * 60 + ((clientY - col.getBoundingClientRect().top) / hourHeight) * 60);
   grid.querySelectorAll('[data-day]').forEach(button => button.onclick = () => onDay?.(button.dataset.day, button));
   if (!editable) return () => {};
@@ -224,12 +232,28 @@ export function bindWeek(root, { schedule, mode, onChange, onDay, editable = tru
     ghost.style.height = `${Math.max(4, y(bottom) - y(top))}px`;
     ghost.textContent = `${clock(top)}–${clock(bottom)}`;
   };
+  const reset = () => {
+    drag = null;
+    ghost.remove();
+    grid.classList.remove('dragging', 'moving');
+    grid.querySelectorAll('.resizing,.lifted').forEach(b => b.classList.remove('resizing', 'lifted'));
+  };
+  // The column under the pointer, clamped to the first and last day.
+  const columnAt = clientX => {
+    const cols = [...grid.querySelectorAll('[data-col]')], i = cols.findIndex(col => clientX < col.getBoundingClientRect().right);
+    return cols[i < 0 ? cols.length - 1 : i];
+  };
   function down(event) {
     if (event.button !== 0) return;
     const col = event.target.closest('[data-col]'), block = event.target.closest('.wk-block'), handle = event.target.closest('[data-handle]');
     if (!col || col.classList.contains('past')) return;
     const key = col.dataset.col, ranges = rangesFor(schedule, key, mode), start = minuteAt(col, event.clientY);
-    if (block && !handle) { drag = { kind: 'click', key, index: Number(block.dataset.block), x: event.clientX, y: event.clientY }; return; }
+    // A press on a block is a click (remove) until the pointer travels a few pixels; then it moves the block.
+    if (block && !handle) {
+      const index = Number(block.dataset.block);
+      drag = { kind: 'press', key, block, index, range: ranges[index], target: col, x: event.clientX, y: event.clientY };
+      return;
+    }
     event.preventDefault();
     if (handle) {
       const index = Number(block.dataset.block), range = ranges[index];
@@ -241,8 +265,26 @@ export function bindWeek(root, { schedule, mode, onChange, onDay, editable = tru
     place(drag.top, drag.bottom);
     grid.classList.add('dragging');
   }
+  const travelled = event => Math.abs(event.clientX - drag.x) >= 4 || Math.abs(event.clientY - drag.y) >= 4;
   function move(event) {
-    if (!drag || drag.kind === 'click') return;
+    if (!drag) return;
+    if (drag.kind === 'press') {
+      if (!travelled(event) || !drag.range) return;
+      drag.kind = 'move';
+      grid.setPointerCapture?.(event.pointerId);
+      drag.block.classList.add('lifted');
+      grid.classList.add('dragging', 'moving');
+    }
+    if (drag.kind === 'move') {
+      const col = columnAt(event.clientX), length = drag.range.end - drag.range.start;
+      if (!col.classList.contains('past')) drag.target = col;
+      const shift = Math.round(((event.clientY - drag.y) / hourHeight) * 60 / SNAP) * SNAP;
+      drag.top = Math.max(from * 60, Math.min(to * 60 - length, drag.range.start + shift));
+      drag.bottom = drag.top + length;
+      if (ghost.parentNode !== drag.target) drag.target.append(ghost);
+      place(drag.top, drag.bottom);
+      return;
+    }
     const minute = minuteAt(drag.col, event.clientY);
     if (drag.kind === 'create') { drag.top = Math.min(drag.anchor, minute); drag.bottom = Math.max(drag.anchor, minute); }
     else if (drag.edge === 'start') drag.top = Math.min(minute, drag.bottom - SNAP);
@@ -253,13 +295,13 @@ export function bindWeek(root, { schedule, mode, onChange, onDay, editable = tru
   function up(event) {
     if (!drag) return;
     const current = drag;
-    drag = null;
-    ghost.remove();
-    grid.classList.remove('dragging');
-    grid.querySelectorAll('.resizing').forEach(b => b.classList.remove('resizing'));
+    if (current.kind === 'press' && travelled(event)) return reset();
+    reset();
     const ranges = rangesFor(schedule, current.key, mode);
-    if (current.kind === 'click') {
-      if (Math.abs(event.clientX - current.x) < 4 && Math.abs(event.clientY - current.y) < 4) onChange(withRanges(schedule, current.key, mode, removeRange(ranges, current.index)), { action: 'remove', key: current.key });
+    if (current.kind === 'press') return onChange(withRanges(schedule, current.key, mode, removeRange(ranges, current.index)), { action: 'remove', key: current.key });
+    if (current.kind === 'move') {
+      const toKey = current.target.dataset.col;
+      if (toKey !== current.key || current.top !== current.range.start) onChange(moveRange(schedule, mode, current.key, current.index, toKey, { start: current.top, end: current.bottom }), { action: 'move', key: toKey, from: current.key });
       return;
     }
     if (current.kind === 'create' && current.bottom - current.top >= SNAP) onChange(withRanges(schedule, current.key, mode, addRange(ranges, { start: current.top, end: current.bottom })), { action: 'add', key: current.key });
@@ -274,13 +316,18 @@ export function bindWeek(root, { schedule, mode, onChange, onDay, editable = tru
   grid.addEventListener('pointerdown', down);
   grid.addEventListener('pointermove', move);
   grid.addEventListener('pointerup', up);
-  grid.addEventListener('pointercancel', () => { drag = null; ghost.remove(); grid.classList.remove('dragging'); });
+  grid.addEventListener('pointercancel', reset);
   grid.addEventListener('keydown', keyBlock);
+  // Escape drops whatever is being dragged and leaves the hours as they were.
+  const cancel = event => { if (drag && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); reset(); } };
+  document.addEventListener('keydown', cancel, true);
   return () => {
     grid.removeEventListener('pointerdown', down);
     grid.removeEventListener('pointermove', move);
     grid.removeEventListener('pointerup', up);
+    grid.removeEventListener('pointercancel', reset);
     grid.removeEventListener('keydown', keyBlock);
+    document.removeEventListener('keydown', cancel, true);
   };
 }
 
