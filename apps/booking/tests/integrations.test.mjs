@@ -39,8 +39,21 @@ test('generic webhook sends stable signed payload and discards response text; re
 });
 test('Slack and Discord cannot turn guest strings into mentions, and guest fields require opt-in',()=>{
  const event={type:'booking.confirmed',booking:{title:'@everyone <@U123> <!channel>'},guest:{name:'@here',email:'guest@example.com'}};
- const slack=adapterPayload('slack',event);assert.equal(slack.blocks[0].text.type,'plain_text');assert.equal(slack.link_names,false);assert.ok(!slack.text.includes('@'));assert.ok(!slack.text.includes('<'));
+ const slack=adapterPayload('slack',event);assert.equal(slack.blocks[0].text.verbatim,true);assert.equal(slack.link_names,false);assert.ok(!slack.text.includes('@'));assert.ok(!slack.text.includes('<'));
+ assert.ok(!JSON.stringify(slack.blocks).match(/<[@!#]/));assert.ok(!slack.text.includes('guest@'));
  assert.deepEqual(adapterPayload('discord',event).allowed_mentions,{parse:[]});
+ const quiet={...event};delete quiet.guest;assert.ok(!JSON.stringify(adapterPayload('slack',quiet)).includes('guest@'));assert.equal(adapterPayload('discord',quiet).embeds[0].fields,undefined);
+});
+test('Slack and Discord messages are readable, show local times and keep guest markdown inert',()=>{
+ const start=Date.UTC(2026,10,17,13),end=start+1800000,event={type:'booking.rescheduled',booking:{title:'Intro call',start,end},previousBooking:{start:start-86400000,end:end-86400000},guest:{name:'[Reschedule](https://phish.example) **now**',email:'ada@example.com'}};
+ const slack=adapterPayload('slack',event);assert.equal(slack.text,'Booking rescheduled: Intro call');assert.equal(slack.blocks[0].text.text,'*Booking rescheduled*\nIntro call');
+ assert.match(slack.blocks[1].elements[0].text,new RegExp(`^<!date\\^${start/1000}\\^\\{date_short_pretty\\} at \\{time\\}\\|2026-11-17 13:00 UTC> – <!date\\^${end/1000}\\^\\{time\\}\\|13:30 UTC>  ·  was <!date\\^${start/1000-86400}`));
+ assert.equal(slack.blocks[2].elements[0].type,'plain_text');
+ const discord=adapterPayload('discord',event),embed=discord.embeds[0];assert.equal(discord.content,undefined);assert.equal(embed.title,'Booking rescheduled');
+ assert.equal(embed.description,`**Intro call**\n<t:${start/1000}:F> – <t:${end/1000}:t>\nWas <t:${start/1000-86400}:F> – <t:${end/1000-86400}:t>`);
+ const guest=embed.fields[0].value;assert.ok(!/(^|[^\\])[\[\]()*]/.test(guest));assert.ok(!guest.includes('://'));assert.match(guest,/ada\\@example\\\.com/);
+ const test=adapterPayload('slack',{type:'integration.test',booking:{title:'Integration test',start,end}});assert.equal(test.text,'Test notification');assert.ok(!JSON.stringify(test).includes('<!date'));
+ assert.equal(adapterPayload('discord',{type:'integration.test',booking:{title:'Integration test',start,end}}).embeds[0].description,'Booking updates will appear in this channel.');
 });
 test('rate limiting schedules bounded retry with stable event identity and manual retries never alter bookings',async()=>{
  let calls=0;const {ledger,box}=setup({fetch:async()=>{calls++;return new Response('',{status:429,headers:{'retry-after':'120'}});}});await create(ledger);ledger.putBooking(booking());await box.processBatch();const first=box.status().deliveries[0],raw=box.delivery(first.id);assert.equal(first.state,'retry');assert.ok(first.nextAttemptAt>=Date.now()+119000);await at(raw.due,()=>box.processBatch());assert.equal(calls,2);assert.equal(box.status().deliveries[0].eventId,first.eventId);assert.equal((await box.retry({deliveryId:first.id})).status,409);
@@ -56,6 +69,13 @@ test('freeze prevents tests and batch effects; restore quarantine blocks replay 
 test('restart retains outbox; stale in-flight lease retries with same event id and synthetic tests carry no real booking data',async()=>{
  let calls=0;const {ledger,box,db}=setup({fetch:async()=>{calls++;throw Error('ambiguous timeout');}});const c=await create(ledger);ledger.putBooking(booking());await box.processBatch();const id=box.status().deliveries[0].id,eventId=box.delivery(id).eventId;const restarted=setup({db,fetch:async()=>{calls++;return new Response('',{status:200});}});await at(box.delivery(id).due,()=>restarted.box.processBatch());assert.equal(restarted.box.delivery(id).eventId,eventId);assert.equal(restarted.box.delivery(id).state,'delivered');assert.equal(calls,2);
  const testResult=await restarted.box.test({id:c.integration.id});const testJob=restarted.box.delivery(testResult.deliveryId);assert.equal(testJob.event.type,'integration.test');assert.ok(!JSON.stringify(testJob).includes('Private Name'));assert.ok(!JSON.stringify(testJob).includes('private@example.com'));assert.ok(restarted.alarm());
+});
+
+test('a test message is sent in the request and reports its outcome, without waiting for the alarm',async()=>{
+ const posts=[];let reply=new Response('',{status:200});const {ledger,box}=setup({fetch:async(url,init)=>{if(String(url).includes('hooks.slack.com'))posts.push(JSON.parse(init.body));return reply;}});const c=await create(ledger);
+ const sent=await box.test({id:c.integration.id});assert.equal(sent.state,'delivered');assert.equal(posts.length,1);assert.equal(posts[0].text,'Test notification');assert.equal(box.delivery(sent.deliveryId).attempts,1);
+ reply=new Response('',{status:404});const refused=await box.test({id:c.integration.id});assert.equal(refused.state,'failed');assert.equal(refused.errorCode,'provider_rejected');
+ reply=new Response('',{status:503});const later=await box.test({id:c.integration.id});assert.equal(later.state,'retry');assert.equal(later.errorCode,'provider_unavailable');assert.ok(box.nextDue()>Date.now());
 });
 
 test('cosmetic rename preserves queued and in-flight accepted payloads',async()=>{

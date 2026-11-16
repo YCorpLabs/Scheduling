@@ -26,7 +26,7 @@ import { editorMarkup, readEditor, ownHoursOf, previewSlots, previewMarkup, bind
 import { availabilityPageMarkup, bindAvailabilityPage, currentMonday, zoneLabel } from "/availability-page.js";
 import { addDays, weeklySummary, zonedEpoch } from "/week-calendar.js";
 import { WORKSPACE_HEADER, resolveWorkspaces, readStoredWorkspace, storeWorkspace, clearStoredWorkspace, captureInviteToken, stashInviteToken, takePendingInvite, clearPendingInvite, roleLabel, switcherMarkup, bindSwitcher, showCreateWorkspace, sectionsFor, can, canAdminister, cleanWorkspace, teamMarkup, bindTeam, showInviteDialog, showInviteAcceptance } from "/workspace-ui.js";
-import { integrationsMarkup, bindIntegrations } from "/integrations-ui.js";
+import { integrationsMarkup, bindIntegrations, integrationsHeading } from "/integrations-ui.js";
 import { normalizeBrand, brandMark, studioName, legalLinksMarkup } from "/brand.js";
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 let activeWorkspace = null, onCompanyRefusal = () => {
@@ -518,7 +518,7 @@ export async function hostUI(bootstrap) {
     if (section === "Analytics") return refreshButton("refresh-analytics", analyticsLoading);
     if (section === "Status") return refreshButton("refresh-operations", opsLoading);
     if (section === "Team" && canAdminister(ws.active) && teamData) return '<button class="primary compact-button" id="team-invite">Invite</button>';
-    if (section === "Integrations" && intData?.integrations?.length) return '<button class="primary compact-button" id="add-integration" data-add-integration>Add integration</button>';
+    if (section === "Integrations") return integrationsHeading(intData);
     return "";
   }
   async function refreshContributions() {
@@ -780,7 +780,7 @@ export async function hostUI(bootstrap) {
     if (section === "Analytics") return analyticsData ? analyticsMarkup(analyticsData, analyticsMetric) : `<p role="status">${analyticsLoading ? "Loading stats…" : "Stats are unavailable. Try refreshing."}</p>`;
     if (section === "Status") return operationsMarkup(opsData, { loading: opsLoading, error: opsError, formatTime: time });
     if (section === "Team") return `<div class="team-workspace">${teamMarkup(teamData, { workspace: ws.active, email: bootstrap.email, loading: teamLoading, error: teamError, formatDate: (ms) => fmt(ms, { month: "short", day: "numeric" }) })}${companyCalendarsMarkup()}${teamData ? profileExportMarkup(ws.active) : ""}</div>`;
-    if (section === "Integrations") return `<div class="team-workspace">${integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time })}</div>`;
+    if (section === "Integrations") return integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time });
     return bookingList(notices);
   }
   // Calendars an admin connected for the whole team (from before members had their own).
