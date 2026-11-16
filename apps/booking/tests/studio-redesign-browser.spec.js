@@ -184,7 +184,7 @@ test('availability: drag to add, click to remove, one-week day off, past days lo
 
 test('availability: drag a block to a new time or day, in either view; Escape puts it back',async({page})=>{
  const state=await open(page,'#availability');
- await expect(page.locator('[data-week]')).toBeVisible();
+ await expect(page.locator('.av-sum')).toContainText('open next week');
  const hours=day=>state.writes.at(-1)?.availabilitySchedules?.[0]?.weeklyHours?.[day];
  const mon=await columnBox(page,0),tue=await columnBox(page,1),wed=await columnBox(page,2),sat=await columnBox(page,5);
  await page.mouse.move(mon.x,mon.y(12));await page.mouse.down();await page.mouse.move(mon.x,mon.y(12.5),{steps:4});
