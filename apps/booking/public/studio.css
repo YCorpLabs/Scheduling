@@ -179,6 +179,28 @@ input:focus-visible+.publish-switch{outline:2px solid var(--ink);outline-offset:
 .av-accounts{font-size:12px;color:var(--faint);margin:0;overflow-wrap:anywhere}
 .av-accounts a{color:inherit}
 .av-account-name{font-size:12px;color:var(--muted);margin:6px 0 2px}
+/* Busy times still loading: a thin moving line over the week. */
+.av-grid{position:relative}
+.av-grid[aria-busy=true]::before{content:"";position:absolute;z-index:4;top:0;left:12px;right:12px;height:2px;border-radius:2px;background:linear-gradient(90deg,transparent,var(--muted),transparent) no-repeat;background-size:30% 100%;animation:av-busy 1.2s ease-in-out infinite}
+@keyframes av-busy{from{background-position:-50% 0}to{background-position:150% 0}}
+
+/* First-load placeholders in each page's own layout */
+.sk i{display:block;height:14px;border-radius:6px;background:var(--soft);animation:sk-pulse 1.6s ease-in-out infinite}
+.sk .av-head i{width:204px;height:32px;border-radius:9px}
+.sk .av-head i+i{width:170px;height:30px;margin-left:auto}
+.sk .av-panel i:nth-child(odd){width:45%;height:11px}
+.sk .av-panel i:nth-child(even){width:85%}
+.sk .av-panel i:last-child{width:100%;height:32px;border-radius:8px}
+.sk-days,.sk-hours{display:grid;grid-template-columns:46px repeat(7,1fr)}
+.sk-days{height:51px;border-bottom:1px solid var(--line)}
+.sk-hours{height:528px}
+.sk-days span+span,.sk-hours span+span{border-left:1px solid var(--row)}
+.sk-hours span+span{background-image:repeating-linear-gradient(to bottom,transparent 0 43px,var(--row) 43px 44px)}
+.sk-list>div{display:grid;gap:12px;max-width:760px}
+.sk-list i{height:52px;border-radius:10px}
+.sk-list i:first-child{width:200px;height:28px;margin-bottom:12px}
+@keyframes sk-pulse{50%{opacity:.5}}
+@media (prefers-reduced-motion:reduce){.sk i{animation:none}.av-grid[aria-busy=true]::before{animation:none;background-position:50% 0}}
 .wk{border:1px solid #e3e3e6;border-radius:12px;overflow:hidden;background:var(--surface);user-select:none;-webkit-user-select:none}
 .wk-head,.wk-allday{display:grid;grid-template-columns:46px repeat(7,1fr)}
 .wk-head{border-bottom:1px solid #e3e3e6}

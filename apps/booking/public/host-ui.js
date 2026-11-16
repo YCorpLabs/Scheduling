@@ -32,8 +32,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 let activeWorkspace = null, onCompanyRefusal = () => {
 };
 const ACCOUNT_ROUTES = /^(workspaces$|workspace\/invitations\/(inspect|accept)$|sessions(\/|$)|calendar-contributions(\/|$))/;
-async function api(path, data) {
-  const headers = data ? { "Content-Type": "application/json" } : {}, company = activeWorkspace && !activeWorkspace.personal && !ACCOUNT_ROUTES.test(path) ? activeWorkspace : null;
+async function api(path, data, { workspace = activeWorkspace } = {}) {
+  const headers = data ? { "Content-Type": "application/json" } : {}, company = workspace && !workspace.personal && !ACCOUNT_ROUTES.test(path) ? workspace : null;
   if (company) headers[WORKSPACE_HEADER] = company.id;
   const r = await fetch("/api/live/" + path, data ? { method: "POST", headers, body: JSON.stringify(data) } : { headers });
   let value;
@@ -73,6 +73,29 @@ export async function hostUI(bootstrap) {
   // Availability page and link editor state.
   let av = { mode: "every", monday: null, events: [], calendars: [], nextWeek: null, status: "", loadedFor: "" }, avUnbind = () => {
   }, linkStats = {}, copiedLink = "", ownHoursDraft = null, previewDay = "", previewBusy = [], previewTimer = 0;
+  // A load starts its independent reads together. An early read is the same
+  // request the load would send, keyed by workspace and path, so its reply or
+  // error is used as is. A different workspace or a newer load sends it again.
+  let earlyReads = new Map();
+  const earlyKey = (workspace, path) => (workspace.personal ? "personal" : workspace.id) + " " + path;
+  function prefetch(workspace, path) {
+    const key = earlyKey(workspace, path);
+    if (!earlyReads.has(key)) earlyReads.set(key, { gen: generation, reply: api(path, null, { workspace }).then((value) => ({ value }), (error) => ({ error })) });
+  }
+  async function take(path) {
+    const key = earlyKey(ws.active, path), entry = earlyReads.get(key);
+    earlyReads.delete(key);
+    if (entry?.gen !== generation) return api(path);
+    const reply = await entry.reply;
+    if (reply.error) throw reply.error;
+    return reply.value;
+  }
+  // Before the listing returns, only the personal profile is safe to ask for:
+  // a remembered company id is never sent until the listing confirms it.
+  const startsPersonal = () => {
+    const stored = readStoredWorkspace();
+    return !stored || stored.account !== account || stored.id === account || stored.id === "personal";
+  };
   const hasOwnCalendar = () => !ws.active.personal && can(ws.active, "manageOwnCalendar");
   const ownView = () => hasOwnCalendar();
   const legacySettings = () => ({ ...settings, accounts: settings.accounts.filter((a) => !a.ownerMemberId) });
@@ -126,10 +149,29 @@ export async function hostUI(bootstrap) {
   function ensureSection() {
     if (!allowed().includes(section)) section = allowed()[0];
   }
+  // Reads a load needs regardless of what it renders first.
+  function prefetchFirstReads(workspace) {
+    prefetch(workspace, "settings");
+    prefetch(workspace, "bookings");
+    if (section !== "Availability" || !workspace.personal) return;
+    // The week is computed in the browser's zone; a profile in another zone misses and refetches.
+    const zoneName = browserZone(), monday = currentMonday(zoneName);
+    prefetch(workspace, weekPath(monday, zoneName, true));
+    prefetch(workspace, weekPath(addDays(monday, 7), zoneName, true));
+  }
   async function load({ first = false } = {}) {
     const gen = ++generation;
+    try {
+      await loadGeneration(gen, first);
+    } finally {
+      if (gen === generation) earlyReads.clear();
+    }
+  }
+  async function loadGeneration(gen, first) {
     if (first) refreshContributions();
-    await loadWorkspaces();
+    const listed = loadWorkspaces();
+    if (!linkedWorkspace && startsPersonal()) prefetchFirstReads({ personal: true });
+    await listed;
     if (gen !== generation) return;
     if (first && calendarCallback && hasOwnCalendar()) {
       section = "Availability";
@@ -138,8 +180,10 @@ export async function hostUI(bootstrap) {
       history.replaceState(null, "", location.pathname + (q.size ? "?" + q : "") + "#availability");
     }
     ensureSection();
+    // The listing has confirmed this workspace, so its bookings can load beside its settings.
+    prefetch(ws.active, "bookings");
     try {
-      const latest = await api("settings");
+      const latest = await take("settings");
       if (gen !== generation) return;
       settings = latest;
       settingsBaseline = fingerprint(settings);
@@ -228,6 +272,7 @@ export async function hostUI(bootstrap) {
   }
   function resetWorkspaceState() {
     generation++;
+    earlyReads.clear();
     profileExport?.controller.dispose();
     profileExport = null;
     ownLoad++;
@@ -518,9 +563,11 @@ export async function hostUI(bootstrap) {
     const colors = new Map(av.calendars.map((c) => [c.accountId + "\n" + c.id, c.color]));
     return { schedule, mode: av.mode, monday: av.monday || currentMonday(schedule.zone), events: av.events.map((e) => ({ ...e, color: colors.get(e.accountId + "\n" + e.calendarId) })), nextWeek: av.nextWeek, calendars: av.calendars, accounts, status: av.status, scope: "person", connectHref: personal ? connectHref() : memberConnectUrl(ws.active.id), canDisconnect: personal && can(ws.active, "manageCalendars"), editable, notice, calendarsLoading: av.loading };
   }
+  function weekPath(monday, zoneName, personal = ws.active.personal) {
+    return `${personal ? "calendar-events" : "my-calendar/events"}?from=${zonedEpoch(monday, 0, zoneName)}&to=${zonedEpoch(addDays(monday, 7), 0, zoneName)}`;
+  }
   async function fetchWeek(monday, zoneName) {
-    const from = zonedEpoch(monday, 0, zoneName), to = zonedEpoch(addDays(monday, 7), 0, zoneName);
-    return api(`${ws.active.personal ? "calendar-events" : "my-calendar/events"}?from=${from}&to=${to}`);
+    return take(weekPath(monday, zoneName));
   }
   async function refreshAvailability({ eventsOnly = false } = {}) {
     const gen = generation;
@@ -534,6 +581,11 @@ export async function hostUI(bootstrap) {
     av.monday ||= view.monday;
     const monday = av.monday, next = addDays(currentMonday(view.schedule.zone), 7), key = ws.active.id + monday;
     av.loading = true;
+    // A week not shown yet repaints as loading. A loaded week is only marked,
+    // since repainting it could interrupt a drag.
+    if (av.loadedFor !== key) {
+      if (section === "Availability") renderAvailability();
+    } else document.querySelector("[data-av-root] .av-grid")?.setAttribute("aria-busy", "true");
     try {
       const [week, nextWeek] = await Promise.all([fetchWeek(monday, view.schedule.zone), monday === next ? null : fetchWeek(next, view.schedule.zone)]);
       if (gen !== generation || av.monday !== monday) return;
@@ -691,10 +743,16 @@ export async function hostUI(bootstrap) {
       }
     });
   }
+  // Placeholder shapes in the page's own layout while its first data loads. No sample hours or rows.
+  function loadingMarkup() {
+    const bars = (n) => "<i></i>".repeat(n), cells = '<span></span>'.repeat(8);
+    if (section === "Availability") return `<div class="sk" role="status"><span class="sr-only">Loading…</span><div class="av-head" aria-hidden="true">${bars(2)}</div><div class="av-wrap" aria-hidden="true"><div class="wk sk-week"><div class="sk-days">${cells}</div><div class="sk-hours">${cells}</div></div><div class="av-panel">${bars(5)}</div></div></div>`;
+    return `<div class="sk sk-list" role="status"><span class="sr-only">Loading…</span><div aria-hidden="true">${bars(5)}</div></div>`;
+  }
   function availabilityBody() {
-    if (!ws.active.personal && !ownCalendar) return ownError ? `<p role="alert">${esc(ownError)}</p><button type="button" class="secondary" data-own-retry>Try again</button>` : '<p role="status">Loading…</p>';
+    if (!ws.active.personal && !ownCalendar) return ownError ? `<p role="alert">${esc(ownError)}</p><button type="button" class="secondary" data-own-retry>Try again</button>` : loadingMarkup();
     const view = availabilityView();
-    return view ? `<div data-av-root>${availabilityPageMarkup(view)}</div>` : '<p role="status">Loading…</p>';
+    return view ? `<div data-av-root>${availabilityPageMarkup(view)}</div>` : loadingMarkup();
   }
   async function refreshLinkStats() {
     const gen = generation;
@@ -715,7 +773,7 @@ export async function hostUI(bootstrap) {
     }
   }
   function sectionBody(notices = "") {
-    if (!settings) return loadError ? `<div class="team-state"><p class="error" role="alert">${esc(loadError)}</p><div class="row"><button type="button" class="secondary compact-button" id="retry-load">Try again</button>${ws.active.personal ? "" : '<button type="button" class="secondary compact-button" data-workspace-personal>Back to your profile</button>'}</div></div>` : '<div class="team-state" role="status">Loading…</div>';
+    if (!settings) return loadError ? `<div class="team-state"><p class="error" role="alert">${esc(loadError)}</p><div class="row"><button type="button" class="secondary compact-button" id="retry-load">Try again</button>${ws.active.personal ? "" : '<button type="button" class="secondary compact-button" data-workspace-personal>Back to your profile</button>'}</div></div>` : loadingMarkup();
     const time = (ms) => fmt(ms, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     if (section === "Meetings") return editing ? notices + meeting() : bookingLinks().replace("</header>", "</header>" + notices);
     if (section === "Availability") return availabilityBody();
@@ -865,7 +923,7 @@ export async function hostUI(bootstrap) {
     bookingLoading = true;
     if (!quiet) render();
     try {
-      const result = await api("bookings");
+      const result = await take("bookings");
       if (gen !== generation) return;
       bookings = result.bookings || [];
       reconciliationIssues = result.reconciliationIssues || [];
@@ -1768,5 +1826,7 @@ export async function hostUI(bootstrap) {
       e.returnValue = "";
     }
   });
+  // Paint the Studio frame now; the first reads fill it in.
+  render();
   await load({ first: true });
 }

@@ -26,7 +26,7 @@ export function availabilityPageMarkup(view) {
   const panel = view.mode === 'week'
     ? `<aside class="av-panel" aria-label="This week"><div class="av-sum"><b>${changes.length ? `${changes.length} change${changes.length === 1 ? '' : 's'}` : 'No changes'}</b>to this week</div>${changes.length ? `<ul class="av-changes">${changes.map(key => `<li><b>${esc(dayLabel(key).split(' ').slice(0, 2).join(' '))}</b> <span>${esc(rangesFor(view.schedule, key, 'week').map(rangeText).join(', ') || 'Off')}</span></li>`).join('')}</ul><button type="button" class="link-button" data-undo-week>Undo this week’s changes</button>` : '<p class="muted">Drag to change this week’s hours, or click a day to take it off.</p>'}</aside>`
     : panelMarkup(view);
-  return `<section class="availability-page" data-availability-page aria-label="Availability">${view.notice || ''}${head}<div class="av-wrap"><div class="av-grid">${weekMarkup({ schedule: view.schedule, mode: view.mode, monday: view.monday, events: view.events, today, editable: view.editable !== false, label: view.scope === 'link' ? view.title : 'Availability' })}</div>${panel}</div></section>`;
+  return `<section class="availability-page" data-availability-page aria-label="Availability">${view.notice || ''}${head}<div class="av-wrap"><div class="av-grid"${view.calendarsLoading ? ' aria-busy="true"' : ''}>${weekMarkup({ schedule: view.schedule, mode: view.mode, monday: view.monday, events: view.events, today, editable: view.editable !== false, label: view.scope === 'link' ? view.title : 'Availability' })}</div>${panel}</div></section>`;
 }
 
 function panelMarkup(view) {
