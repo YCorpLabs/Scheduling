@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addDays, weekdayOf, mondayOf, weekDates, snap, normalize, addRange, removeRange, replaceRange, rangesFor, withRanges,
+  addDays, weekdayOf, mondayOf, weekDates, snap, normalize, addRange, removeRange, replaceRange, moveRange, rangesFor, withRanges,
   dayOff, useUsualHours, weekChanges, undoWeek, openMinutes, hoursText, weeklySummary, weekMarkup, zonedEpoch, dayLabel
 } from '../public/week-calendar.js';
 import { bookingsMarkup, setupMarkup, expiresIn, isRequest, isUpcoming, isPast, isCancelled } from '../public/bookings-ui.js';
@@ -61,6 +61,20 @@ test('a day off and "use usual hours" are one-week changes that can be undone', 
   assert.deepEqual(undoWeek(s, dates).dateOverrides, {});
   const later = dayOff(s, '2026-11-26');
   assert.deepEqual(Object.keys(undoWeek(later, dates).dateOverrides), ['2026-11-26'], 'only this week is undone');
+});
+
+test('moving a block keeps its length, changes the weekday or only that date, and merges where it lands', () => {
+  const split = { ...schedule(), weeklyHours: { ...workweek, 2: [{ start: 540, end: 675 }, { start: 795, end: 1005 }] } };
+  const later = moveRange(split, 'every', '2026-11-17', 0, '2026-11-17', { start: 600, end: 735 });
+  assert.deepEqual(later.weeklyHours[2], [{ start: 600, end: 735 }, { start: 795, end: 1005 }]);
+  const toSaturday = moveRange(split, 'every', '2026-11-17', 1, '2026-11-21', { start: 600, end: 810 });
+  assert.deepEqual(toSaturday.weeklyHours[2], [{ start: 540, end: 675 }]);
+  assert.deepEqual(toSaturday.weeklyHours[6], [{ start: 600, end: 810 }]);
+  assert.deepEqual(toSaturday.dateOverrides, {});
+  const once = moveRange(split, 'week', '2026-11-17', 0, '2026-11-18', { start: 480, end: 615 });
+  assert.deepEqual(once.dateOverrides, { '2026-11-17': [{ start: 795, end: 1005 }], '2026-11-18': [{ start: 480, end: 1020 }] }, 'lands on Wednesday and merges with its hours');
+  assert.deepEqual(once.weeklyHours, split.weeklyHours, 'usual hours unchanged');
+  assert.deepEqual(split.weeklyHours[2], [{ start: 540, end: 675 }, { start: 795, end: 1005 }], 'input unchanged');
 });
 
 test('open hours subtract busy events once, in the schedule time zone', () => {

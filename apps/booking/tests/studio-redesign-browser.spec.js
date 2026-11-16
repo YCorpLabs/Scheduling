@@ -182,6 +182,42 @@ test('availability: drag to add, click to remove, one-week day off, past days lo
  await expect(page.locator(`[data-day="${key}"]`)).toHaveClass(/chg/);
 });
 
+test('availability: drag a block to a new time or day, in either view; Escape puts it back',async({page})=>{
+ const state=await open(page,'#availability');
+ await expect(page.locator('.av-sum')).toContainText('open next week');
+ const hours=day=>state.writes.at(-1)?.availabilitySchedules?.[0]?.weeklyHours?.[day];
+ const mon=await columnBox(page,0),tue=await columnBox(page,1),wed=await columnBox(page,2),sat=await columnBox(page,5);
+ await page.mouse.move(mon.x,mon.y(12));await page.mouse.down();await page.mouse.move(mon.x,mon.y(12.5),{steps:4});
+ await expect(page.locator('.wk-ghost')).toHaveText('09:30–17:30');
+ await expect(page.locator('.wk-block.lifted')).toHaveCount(1);
+ await page.mouse.move(mon.x,mon.y(13),{steps:4});await page.mouse.up();
+ await expect.poll(()=>hours(1)).toEqual([{start:600,end:1080}]);
+ await expect(page.locator('[data-col]').nth(0).locator('.wk-block')).toHaveText('10:00–18:00');
+ await page.mouse.move(tue.x,tue.y(12));await page.mouse.down();await page.mouse.move(sat.x,sat.y(12),{steps:8});await page.mouse.up();
+ await expect.poll(()=>hours(6)).toEqual([{start:540,end:1020}]);
+ expect(hours(2)).toEqual([]);
+ await expect(page.getByText('Saved')).toBeVisible();
+ const writes=state.writes.length;
+ await page.mouse.move(wed.x,wed.y(12));await page.mouse.down();await page.mouse.move(wed.x,wed.y(14),{steps:4});
+ await expect(page.locator('.wk-ghost')).toBeVisible();
+ await page.keyboard.press('Escape');
+ await expect(page.locator('.wk-ghost')).toHaveCount(0);
+ await page.mouse.up();
+ await expect(page.locator('[data-av-status]')).toHaveText('Saved');
+ await expect(page.locator('[data-col]').nth(2).locator('.wk-block')).toHaveText('09:00–17:00');
+ expect(state.writes.length).toBe(writes);
+ await page.getByRole('button',{name:'This week only'}).click();
+ const loaded=page.waitForResponse(r=>r.url().includes('/api/live/calendar-events'));
+ await page.getByRole('button',{name:'Next week'}).click();await loaded;
+ await expect(page.locator('.wk-col.past')).toHaveCount(0);
+ const [thu,fri]=await page.locator('[data-day]').evaluateAll(days=>days.slice(3,5).map(d=>d.dataset.day));
+ const thuBox=await columnBox(page,3),friBox=await columnBox(page,4);
+ await page.mouse.move(thuBox.x,thuBox.y(12));await page.mouse.down();await page.mouse.move(friBox.x,friBox.y(13),{steps:8});await page.mouse.up();
+ await expect.poll(()=>state.writes.at(-1)?.availabilitySchedules?.[0]?.dateOverrides).toEqual({[thu]:[],[fri]:[{start:540,end:1080}]});
+ expect(hours(4)).toEqual([{start:540,end:1020}]);
+ await expect(page.locator('.av-sum')).toContainText('2 changes');
+});
+
 test('first run: Continue with Google, hours pre-filled Mon–Fri 9–5, then Your link is ready',async({page})=>{
  await open(page,'',{firstRun:true});
  const steps=page.locator('.setup-steps');
