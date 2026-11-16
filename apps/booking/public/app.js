@@ -259,15 +259,18 @@ document.addEventListener('keydown',e=>{
 });
 async function boot(){
   if(ownerPreview){document.title='Preview · '+DEFAULT_BRAND.productName;service={mode:'live'};app.innerHTML='<main class="loading" id="main" role="status">Preview</main>';if(parent!==window)parent.postMessage({type:'email-booking:owner-ready'},location.origin);return;}
+  // Studio code downloads while the session is checked, not after. Importing it has no side effects.
+  const studioCode=admin?import('/host-ui.js'):null;studioCode?.catch(()=>{});
   if(admin&&(await import('/account-deletion-ui.js')).resumeAccountDeletion({root:app}))return;
-  app.innerHTML='<main class="loading" id="main">Loading availability…</main>';
+  app.innerHTML=`<main class="loading" id="main">${admin?'Loading…':'Loading availability…'}</main>`;
   try{
+    const bootstrap=fetch('/api/bootstrap').then(r=>r.json());bootstrap.catch(()=>{});
     // Studio invitations: move the fragment token into this tab's session before sign-in can drop it.
     if(admin&&location.hash.startsWith('#invite=')){const invite=await import('/workspace-ui.js');invite.stashInviteToken(invite.captureInviteToken());}
-    service=await (await fetch('/api/bootstrap')).json();
+    service=await bootstrap;
     serviceBrand=normalizeBrand(service.brand);document.title='Book a conversation · '+brandLabel(serviceBrand);
     if(service.mode!=='local'&&admin){
-      if(service.mode==='live'&&service.authenticated){await (await import('/host-ui.js')).hostUI(service);return;}
+      if(service.mode==='live'&&service.authenticated){await (await studioCode).hostUI(service);return;}
       app.innerHTML=signInScreen({setup:service.mode==='setup'});return;
     }
     if(service.mode==='live'&&managementRoute){await (await import('/manage-ui.js')).manageUI({hostId:managementRoute[1],id:managementRoute[2],token:location.hash.slice(1)});return;}

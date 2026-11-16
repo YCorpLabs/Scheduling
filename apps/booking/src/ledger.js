@@ -319,18 +319,20 @@ export class BookingLedger {
   async calendarEventsFor(accounts,range){
     const from=Number(range?.from),to=Number(range?.to),now=Date.now();
     if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||to<=from||to-from>8*86400000||from<now-60*86400000||to>now+400*86400000)throw Object.assign(Error('Choose a week to show.'),{status:400});
-    const timeMin=new Date(from).toISOString(),timeMax=new Date(to).toISOString(),events=[],calendars=[];
-    for(const account of accounts){
-      if(!account?.connected||account.reconnectRequired)continue;
-      let access;try{access=await this.access(account.id);}catch(error){if(google.grantRejected(error))continue;throw error;}
+    const timeMin=new Date(from).toISOString(),timeMax=new Date(to).toISOString();
+    // Accounts, and each account's busy calendars, are read side by side; results keep their order.
+    const read=await Promise.all(accounts.map(async account=>{
+      if(!account?.connected||account.reconnectRequired)return {events:[],calendars:[]};
+      let access;try{access=await this.access(account.id);}catch(error){if(google.grantRejected(error))return {events:[],calendars:[]};throw error;}
       const listed=await this.google.listCalendars(access,{timeoutMs:10000}),items=(Array.isArray(listed)?listed:listed?.items??[]).filter(c=>!c.deleted),busy=new Set(this.conflictIds(account));
-      for(const c of items)calendars.push({accountId:account.id,id:c.id,summary:c.summary||c.id,color:/^#[0-9a-f]{6}$/i.test(c.backgroundColor??'')?c.backgroundColor:null,accessRole:c.accessRole,primary:c.primary===true,busy:busy.has(c.id),destination:c.id===account.destinationCalendarId});
-      for(const id of busy){if(!items.some(c=>c.id===id))continue;
-        try{for(const e of await this.google.listEvents(access,{calendarId:id,timeMin,timeMax},{timeoutMs:10000}))events.push({...e,accountId:account.id,calendarId:id});}
-        catch(error){if(error?.status!==403&&error?.status!==404)throw error;for(const b of await this.google.freeBusy(access,{calendarIds:[id],timeMin,timeMax},{timeoutMs:10000}))events.push({start:Date.parse(b.start),end:Date.parse(b.end),allDay:false,title:'',booking:false,accountId:account.id,calendarId:id});}
-      }
-    }
-    return {events,calendars};
+      const calendars=items.map(c=>({accountId:account.id,id:c.id,summary:c.summary||c.id,color:/^#[0-9a-f]{6}$/i.test(c.backgroundColor??'')?c.backgroundColor:null,accessRole:c.accessRole,primary:c.primary===true,busy:busy.has(c.id),destination:c.id===account.destinationCalendarId}));
+      const events=await Promise.all([...busy].filter(id=>items.some(c=>c.id===id)).map(async id=>{
+        try{return (await this.google.listEvents(access,{calendarId:id,timeMin,timeMax},{timeoutMs:10000})).map(e=>({...e,accountId:account.id,calendarId:id}));}
+        catch(error){if(error?.status!==403&&error?.status!==404)throw error;return (await this.google.freeBusy(access,{calendarIds:[id],timeMin,timeMax},{timeoutMs:10000})).map(b=>({start:Date.parse(b.start),end:Date.parse(b.end),allDay:false,title:'',booking:false,accountId:account.id,calendarId:id}));}
+      }));
+      return {events:events.flat(),calendars};
+    }));
+    return {events:read.flatMap(r=>r.events),calendars:read.flatMap(r=>r.calendars)};
   }
   calendarEvents(range){return this.calendarEventsFor(this.accounts().filter(a=>!a.ownerMemberId),range);}
   async ownCalendarEvents(member,range){await this.currentCalendarMember(member);const account=this.ownAccount(member);return this.calendarEventsFor(account?[account]:[],range);}
