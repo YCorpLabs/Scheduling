@@ -1,5 +1,19 @@
 import { test, expect } from '@playwright/test';
 const base=process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791';
+test.describe('guest time list',()=>{
+  // The fixture host works 09:00–17:00 in London: 04:00–12:00 for a guest in New York.
+  test.use({timezoneId:'America/New_York'});
+  test('24-hour times have two-digit hours and 12-hour times do not',async({page})=>{
+    await page.goto(base+'/book');
+    await page.locator('.date-cell.available').last().click();
+    const slots=page.locator('[data-slot]');await expect(slots.first()).toHaveText('04:00');
+    const day=await slots.allTextContents();expect(day).toContain('09:45');expect(day).toContain('10:00');
+    for(const text of day)expect(text).toMatch(/^([01]\d|2[0-3]):[0-5]\d$/);
+    await page.getByRole('button',{name:'12h'}).click();
+    await expect(slots.first()).toHaveText('4:00 am');
+    for(const text of await slots.allTextContents())expect(text).toMatch(/^(1[0-2]|[1-9]):[0-5]\d [ap]m$/);
+  });
+});
 test('guest can choose, go back without losing details, reserve, and release',async({page})=>{
   await page.goto(base+'/book');
   await expect(page.getByRole('region',{name:'Choose a date'})).toBeVisible();
