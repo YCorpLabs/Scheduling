@@ -2,6 +2,7 @@
 // Availability week calendar, first run, phone layout and reconnect.
 import {test,expect} from '@playwright/test';
 import {DEFAULT} from '../public/policy.js';
+import {mondayOf,todayKey,addDays,zonedEpoch} from '../public/week-calendar.js';
 const base=process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791';
 const H=3600000,D=24*H,zone='Europe/Oslo',me='h_'+'R'.repeat(24);
 test.use({timezoneId:zone});
@@ -9,7 +10,7 @@ test.use({timezoneId:zone});
 const week=(from,to,days=[1,2,3,4,5])=>Object.fromEntries([0,1,2,3,4,5,6].map(d=>[d,days.includes(d)?[{start:from*60,end:to*60}]:[]]));
 const link=(id,title,extra={})=>({...DEFAULT,id,slug:id,title,host:'Riley Park',company:'',description:'',zone,accountId:'riley',calendarId:'riley@example.com',useDefaultCalendar:true,useDefaultSchedule:true,scheduleId:null,published:true,...extra});
 
-function world({firstRun=false,reconnect=false}={}){
+function world({firstRun=false,reconnect=false,events=[]}={}){
  const now=Date.now(),soon=now+2*H-(now%(15*60000));
  const state={writes:[],decisions:[],settings:firstRun?{revision:'A'.repeat(43),hostId:me,profile:{name:'Riley Park',email:'riley@example.com'},accounts:[],meetingTypes:[link('intro','Intro call',{accountId:null,published:false})],availabilitySchedules:[{id:'availability',name:'Availability',zone,weeklyHours:week(9,17),dateOverrides:{}}],defaultAvailabilityScheduleId:'availability'}:{
   revision:'A'.repeat(43),hostId:me,profile:{name:'Riley Park',email:'riley@example.com'},
@@ -28,7 +29,7 @@ function world({firstRun=false,reconnect=false}={}){
   if(path==='/api/live/settings'&&req.method()==='GET')return json(state.settings);
   if(path==='/api/live/settings'){state.writes.push(body.patch);state.settings={...state.settings,...body.patch,revision:'B'.repeat(42)+state.writes.length%10};return json({settings:state.settings,revision:state.settings.revision});}
   if(path==='/api/live/calendars')return json({accounts:state.settings.accounts.map(a=>({id:a.id,email:a.email,...(reconnect?{reconnectRequired:true,calendars:[]}:{calendars:[{id:'riley@example.com',summary:'Riley Park',primary:true,accessRole:'owner',backgroundColor:'#3a7afe'},{id:'family',summary:'Family',accessRole:'reader',backgroundColor:'#e0763a'}]})}))});
-  if(path==='/api/live/calendar-events')return json({events:[],calendars:reconnect||!state.settings.accounts.length?[]:[{accountId:'riley',id:'riley@example.com',summary:'Riley Park',color:'#3a7afe',accessRole:'owner',primary:true,busy:true,destination:true},{accountId:'riley',id:'family',summary:'Family',color:'#e0763a',accessRole:'reader',primary:false,busy:false,destination:false}]});
+  if(path==='/api/live/calendar-events')return json({events,calendars:reconnect||!state.settings.accounts.length?[]:[{accountId:'riley',id:'riley@example.com',summary:'Riley Park',color:'#3a7afe',accessRole:'owner',primary:true,busy:true,destination:true},{accountId:'riley',id:'family',summary:'Family',color:'#e0763a',accessRole:'reader',primary:false,busy:false,destination:false}]});
   if(path==='/api/live/bookings')return json({bookings:state.bookings});
   if(/^\/api\/live\/bookings\/[^/]+\/decision$/.test(path)){const id=path.split('/').at(-2);state.decisions.push({id,...body});state.bookings=state.bookings.map(b=>b.id===id?{...b,status:body.action==='approve'?'confirmed':'rejected',version:2}:b);return json({booking:state.bookings.find(b=>b.id===id)});}
   if(/^\/api\/live\/bookings\/[^/]+$/.test(path)){const b=state.bookings.find(x=>x.id===path.split('/').pop());return json({booking:b,hostActions:{manage:true}});}
@@ -231,6 +232,37 @@ test('availability: drag a block to a new time or day, in either view; Escape pu
  await expect.poll(()=>state.writes.at(-1)?.availabilitySchedules?.[0]?.dateOverrides).toEqual({[thu]:[],[fri]:[{start:540,end:1080}]});
  expect(hours(4)).toEqual([{start:540,end:1020}]);
  await expect(page.locator('.av-sum')).toContainText('2 changes');
+});
+
+test('availability: events never hide a block\'s time label at any width, titles end in an ellipsis, and a press on an event reaches the block',async({page})=>{
+ const mon=mondayOf(todayKey(zone)),wed=addDays(mon,2),thu=addDays(mon,3),long='Weekly planning with the Fernhill leadership team and partners';
+ const ev=(key,from,to,title)=>({title,start:zonedEpoch(key,from,zone),end:zonedEpoch(key,to,zone),allDay:false,booking:false,accountId:'riley',calendarId:'riley@example.com'});
+ await page.setViewportSize({width:1440,height:900});
+ const state=await open(page,'#availability',{events:[ev(wed,540,555,'Team standup'),ev(wed,600,660,long),ev(thu,510,1050,'Offsite')]});
+ const wedCol=page.locator(`[data-col="${wed}"]`),thuCol=page.locator(`[data-col="${thu}"]`);
+ await expect(wedCol.locator('.wk-event')).toHaveCount(2);
+ // Labels that are not drawn over events never touch one.
+ const hidden=()=>page.locator('.wk-col').evaluateAll(cols=>cols.flatMap(col=>{const events=[...col.querySelectorAll('.wk-event')].map(e=>e.getBoundingClientRect());return [...col.querySelectorAll('.wk-label:not(.over)')].filter(label=>{const r=label.getBoundingClientRect();return events.some(e=>e.top<r.bottom&&e.bottom>r.top&&e.left<r.right&&e.right>r.left);}).map(label=>label.closest('[data-col]').dataset.col);}));
+ const onTop=locator=>locator.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));});
+ expect(await hidden()).toEqual([]);
+ await expect(wedCol.locator('.wk-label')).not.toHaveClass(/over/);
+ // Covered all day: the label sits over the event, below its title, and is what you see there.
+ await expect(thuCol.locator('.wk-label')).toHaveClass(/over/);
+ expect(await onTop(thuCol.locator('.wk-label'))).toBe(true);
+ // A long title stays inside its event and is clamped; the tooltip and the accessible text have all of it.
+ const planning=wedCol.locator('.wk-event').nth(1);
+ await expect(planning).toHaveAttribute('title',long+' 10:00–11:00');
+ await expect(planning).toHaveText(long+', 10:00–11:00');
+ expect(await planning.locator('.wk-event-title').evaluate(el=>{const r=el.getBoundingClientRect(),box=el.parentElement.getBoundingClientRect();return {clamped:el.scrollHeight>el.clientHeight,inside:r.bottom<=box.bottom};})).toEqual({clamped:true,inside:true});
+ expect(await onTop(planning)).toBe(true);
+ // Narrower: the label wraps onto two lines and is placed again clear of the events.
+ await page.setViewportSize({width:1180,height:900});
+ await expect.poll(hidden).toEqual([]);
+ await expect.poll(()=>wedCol.locator('.wk-label').evaluate(el=>el.offsetHeight)).toBeGreaterThan(20);
+ // Pressing the standup acts on the block under it: a click removes Wednesday's hours.
+ const standup=await wedCol.locator('.wk-event').first().boundingBox();
+ await page.mouse.click(standup.x+standup.width/2,standup.y+standup.height/2);
+ await expect.poll(()=>state.writes.at(-1)?.availabilitySchedules?.[0]?.weeklyHours?.[3]).toEqual([]);
 });
 
 test('first run: Continue with Google, hours pre-filled Mon–Fri 9–5, then Your link is ready',async({page})=>{

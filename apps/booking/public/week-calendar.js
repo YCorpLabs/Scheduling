@@ -149,6 +149,44 @@ export function weeklySummary(weeklyHours) {
   return groups.map(g => `${WEEKDAYS[g.days[0]]}${g.days.length > 1 ? '–' + WEEKDAYS[g.days.at(-1)] : ''} ${g.text}`).join(', ') || 'No hours';
 }
 
+// ----- a block's label and the events drawn over it (sizes in px) -----
+// Busy events sit on top of availability blocks. A block's time label goes in
+// the first stretch of the block that no event covers. If events cover all of
+// it, the label sits over them, clear of their titles.
+const EVENT_MIN = 14, EVENT_LINE = 12, LABEL_GAP = 4, LABEL_LINE = 17;
+/** Start of the first stretch from `from` to `to`, `need` tall, that no [start, end] span overlaps; null if none fits. */
+export function freeSpot(from, to, spans, need) {
+  let at = from;
+  for (const [start, end] of [...spans].sort((a, b) => a[0] - b[0])) {
+    if (end <= at) continue;
+    if (start >= at + need) break;
+    at = end;
+  }
+  return at + need <= to ? at : null;
+}
+/** Where a block's label goes: its top inside the block, and whether it has to sit over events. */
+export function labelPlace(blockTop, blockBottom, spans, labelHeight = LABEL_LINE) {
+  const need = labelHeight + 2 * LABEL_GAP, from = blockTop + LABEL_GAP;
+  const clear = freeSpot(from, blockBottom, spans, need);
+  if (clear !== null) return { top: clear + LABEL_GAP - blockTop, over: false };
+  const titles = freeSpot(from, blockBottom, spans.map(([start]) => [start, start + EVENT_MIN]), need);
+  return { top: (titles ?? from) + LABEL_GAP - blockTop, over: true };
+}
+/** Places labels again with measured sizes: in a narrow column a label wraps onto two lines. */
+export function placeLabels(grid) {
+  for (const col of grid.querySelectorAll('[data-col]')) {
+    const top = col.getBoundingClientRect().top;
+    const spans = [...col.querySelectorAll('.wk-event')].map(event => { const r = event.getBoundingClientRect(); return [r.top - top, r.bottom - top]; });
+    for (const block of col.querySelectorAll('.wk-block')) {
+      const label = block.querySelector('.wk-label');
+      if (!label?.offsetHeight) continue;
+      const r = block.getBoundingClientRect(), place = labelPlace(r.top - top, r.bottom - top, spans, label.offsetHeight);
+      label.style.top = `${Math.round(place.top)}px`;
+      label.classList.toggle('over', place.over);
+    }
+  }
+}
+
 // ----- events placed on the grid -----
 function placeEvents(events, dates, zone) {
   const placed = new Map(dates.map(key => [key, []])), allDay = new Map(dates.map(key => [key, []]));
@@ -193,17 +231,18 @@ export function weekMarkup({ schedule, mode = 'every', monday, events = [], toda
   }).join('')}</div>${anyAllDay ? `<div class="wk-allday"><div class="wk-gut"></div>${dates.map(key => `<div>${allDay.get(key).map(e => `<span class="wk-chip" style="--c:${esc(e.color || '#8a8a90')}" title="${esc(e.title || 'Busy')}">${esc(e.title || 'Busy')}</span>`).join('')}</div>`).join('')}</div>` : ''}
 <div class="wk-body" style="height:${height}px"><div class="wk-times" aria-hidden="true">${Array.from({ length: to - from }, (_, i) => `<span style="top:${i * hourHeight}px">${String(from + i).padStart(2, '0')}</span>`).join('')}</div>${dates.map(key => {
     const ranges = rangesFor(schedule, key, mode), offDay = mode === 'week' && hasOverride(schedule, key) && !ranges.length, past = mode === 'week' && today && key < today, canEdit = editable && !past;
-    // Busy events drawn over the top of a block would hide its time label, so the label moves below them.
-    const dayEvents = placed.get(key) ?? [], labelRoom = Math.ceil(18 / hourHeight * 60);
-    const labelAt = r => {
-      let at = r.start;
-      for (let moved = true; moved;) {
-        moved = false;
-        for (const e of dayEvents) if (e.top <= at + labelRoom && e.bottom > at && e.bottom < r.end) { at = e.bottom; moved = true; }
-      }
-      return at;
+    const dayEvents = (placed.get(key) ?? []).map(e => ({ ...e, y: minuteTop(e.top), h: Math.max(EVENT_MIN, minuteTop(e.bottom) - minuteTop(e.top)) })), spans = dayEvents.map(e => [e.y, e.y + e.h]);
+    const block = (r, i) => {
+      const top = minuteTop(r.start), bottom = minuteTop(r.end), place = labelPlace(top, bottom, spans);
+      return `<button type="button" class="wk-block" data-block="${i}" style="top:${top}px;height:${bottom - top}px" aria-label="${esc(dayLabel(key))} ${rangeText(r)}${canEdit ? '. Remove' : ''}" ${canEdit ? '' : 'disabled'}><span class="wk-label${place.over ? ' over' : ''}" style="top:${Math.round(place.top)}px">${rangeText(r)}</span>${canEdit ? '<i class="wk-handle" data-handle="start" aria-hidden="true"></i><i class="wk-handle" data-handle="end" aria-hidden="true"></i>' : ''}</button>`;
     };
-    return `<div class="wk-col${offDay ? ' offday' : ''}${past ? ' past' : ''}" data-col="${key}" role="group" aria-label="${esc(dayLabel(key))}">${ranges.map((r, i) => `<button type="button" class="wk-block" data-block="${i}" style="top:${minuteTop(r.start)}px;height:${minuteTop(r.end) - minuteTop(r.start)}px" aria-label="${esc(dayLabel(key))} ${rangeText(r)}${canEdit ? '. Remove' : ''}" ${canEdit ? '' : 'disabled'}>${(() => { const shift = minuteTop(labelAt(r)) - minuteTop(r.start); return `<span${shift > 0 ? ` style="margin-top:${Math.round(shift - 4)}px"` : ''}>${rangeText(r)}</span>`; })()}${canEdit ? '<i class="wk-handle" data-handle="start" aria-hidden="true"></i><i class="wk-handle" data-handle="end" aria-hidden="true"></i>' : ''}</button>`).join('')}${(placed.get(key) ?? []).map(e => `<div class="wk-event${e.booking ? ' wk-booked' : ''}" data-lane="${e.lane}" style="top:${minuteTop(e.top)}px;height:${Math.max(14, minuteTop(e.bottom) - minuteTop(e.top))}px;--c:${esc(e.color || '#8a8a90')}" title="${esc(e.title || 'Busy')} ${clock(e.top)}–${clock(Math.min(e.bottom, DAY_MINUTES))}">${esc(e.title || 'Busy')}</div>`).join('')}</div>`;
+    // A long title gets as many lines as the event is tall and ends in an ellipsis; the tooltip and screen readers get all of it.
+    const event = e => {
+      const name = e.title || 'Busy', time = `${clock(e.top)}–${clock(Math.min(e.bottom, DAY_MINUTES))}`, lines = Math.max(1, Math.floor((e.h - 2) / EVENT_LINE));
+      const onBlock = ranges.some(r => e.top < r.end && e.bottom > r.start);
+      return `<div class="wk-event${e.booking ? ' wk-booked' : ''}" data-lane="${e.lane}"${onBlock ? ' data-on-block' : ''} style="top:${e.y}px;height:${e.h}px;--c:${esc(e.color || '#8a8a90')}" title="${esc(name)} ${time}"><span class="wk-event-title"${lines > 1 ? ` style="-webkit-line-clamp:${lines}"` : ''}>${esc(name)}</span><span class="sr-only">, ${time}</span></div>`;
+    };
+    return `<div class="wk-col${offDay ? ' offday' : ''}${past ? ' past' : ''}" data-col="${key}" role="group" aria-label="${esc(dayLabel(key))}">${ranges.map(block).join('')}${dayEvents.map(event).join('')}</div>`;
   }).join('')}</div></div>`;
 }
 
@@ -215,13 +254,19 @@ export function weekMarkup({ schedule, mode = 'every', monday, events = [], toda
 export function bindWeek(root, { schedule, mode, onChange, onDay, editable = true, coarse = matchMedia?.('(pointer: coarse)').matches }) {
   const grid = root.querySelector('[data-week]');
   if (!grid) return () => {};
+  placeLabels(grid);
+  const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => placeLabels(grid)) : null;
+  resize?.observe(grid);
+  const unobserve = () => resize?.disconnect();
   const from = Number(grid.dataset.from), to = Number(grid.dataset.to), hourHeight = 44;
   const minuteAt = (col, clientY) => snap(from * 60 + ((clientY - col.getBoundingClientRect().top) / hourHeight) * 60);
+  // Events take the pointer only for their tooltip: a press goes to the block or empty column underneath.
+  const under = event => event.target.closest?.('.wk-event') ? document.elementsFromPoint(event.clientX, event.clientY).find(el => !el.closest('.wk-event')) || event.target : event.target;
   grid.querySelectorAll('[data-day]').forEach(button => button.onclick = () => onDay?.(button.dataset.day, button));
-  if (!editable) return () => {};
+  if (!editable) return unobserve;
   if (coarse) {
-    grid.querySelectorAll('[data-col]:not(.past)').forEach(col => col.onclick = event => onDay?.(col.dataset.col, event.target.closest('.wk-block') || col, { edit: true }));
-    return () => {};
+    grid.querySelectorAll('[data-col]:not(.past)').forEach(col => col.onclick = event => onDay?.(col.dataset.col, under(event).closest('.wk-block') || col, { edit: true }));
+    return unobserve;
   }
   let drag = null;
   const ghost = document.createElement('div');
@@ -245,7 +290,7 @@ export function bindWeek(root, { schedule, mode, onChange, onDay, editable = tru
   };
   function down(event) {
     if (event.button !== 0) return;
-    const col = event.target.closest('[data-col]'), block = event.target.closest('.wk-block'), handle = event.target.closest('[data-handle]');
+    const target = under(event), col = target.closest('[data-col]'), block = target.closest('.wk-block'), handle = target.closest('[data-handle]');
     if (!col || col.classList.contains('past')) return;
     const key = col.dataset.col, ranges = rangesFor(schedule, key, mode), start = minuteAt(col, event.clientY);
     // A press on a block is a click (remove) until the pointer travels a few pixels; then it moves the block.
@@ -322,6 +367,7 @@ export function bindWeek(root, { schedule, mode, onChange, onDay, editable = tru
   const cancel = event => { if (drag && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); reset(); } };
   document.addEventListener('keydown', cancel, true);
   return () => {
+    unobserve();
     grid.removeEventListener('pointerdown', down);
     grid.removeEventListener('pointermove', move);
     grid.removeEventListener('pointerup', up);

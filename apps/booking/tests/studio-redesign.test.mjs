@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addDays, weekdayOf, mondayOf, weekDates, snap, normalize, addRange, removeRange, replaceRange, moveRange, rangesFor, withRanges,
-  dayOff, useUsualHours, weekChanges, undoWeek, openMinutes, hoursText, weeklySummary, weekMarkup, zonedEpoch, dayLabel
+  dayOff, useUsualHours, weekChanges, undoWeek, openMinutes, hoursText, weeklySummary, weekMarkup, zonedEpoch, dayLabel, freeSpot, labelPlace
 } from '../public/week-calendar.js';
 import { bookingsMarkup, setupMarkup, expiresIn, isRequest, isUpcoming, isPast, isCancelled } from '../public/bookings-ui.js';
 import { linksMarkup, linkMenuItems } from '../public/links-ui.js';
@@ -242,15 +242,38 @@ test('the preview uses the person’s availability for "any time" links and hide
   assert.deepEqual(previewSlots(draft, { availability, busy, now, days: 7 }).slots.map(s => new Date(s.start).toISOString()), ['2026-11-16T09:00:00.000Z']);
 });
 
-test('a busy event over the top of a block pushes its time label below the event', () => {
+test('a block\'s time label goes in the first stretch no event covers, and over the events when they cover all of it', () => {
   const s = { ...schedule(), weeklyHours: { ...workweek, 3: [{ start: 540, end: 720 }] } };
-  const planning = { start: zonedEpoch('2026-11-18', 540, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', 600, 'Europe/Oslo'), title: 'Planning' };
-  const later = { start: zonedEpoch('2026-11-18', 600, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', 630, 'Europe/Oslo'), title: 'Call' };
-  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [] }), /<span>09:00–12:00<\/span>/);
-  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [planning] }), /<span style="margin-top:40px">09:00–12:00<\/span>/, 'one hour down, 4px gap');
-  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [planning, later] }), /<span style="margin-top:62px">09:00–12:00<\/span>/, 'follows back-to-back events');
-  const midday = { start: zonedEpoch('2026-11-18', 660, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', 690, 'Europe/Oslo'), title: 'Lunch' };
-  assert.match(weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events: [midday] }), /<span>09:00–12:00<\/span>/, 'events lower in the block leave the label alone');
+  const at = (start, end, title = 'Busy') => ({ start: zonedEpoch('2026-11-18', start, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', end, 'Europe/Oslo'), title });
+  const label = events => weekMarkup({ schedule: s, mode: 'every', monday: '2026-11-16', events }).match(/<span class="wk-label( over)?" style="top:(\d+)px">09:00–12:00<\/span>/)?.slice(1);
+  assert.deepEqual(label([]), [undefined, '8'], 'no events: at the top of the block');
+  assert.deepEqual(label([at(540, 600, 'Planning')]), [undefined, '48'], 'one hour down, 4px below the event');
+  assert.deepEqual(label([at(540, 600, 'Planning'), at(600, 630, 'Call')]), [undefined, '70'], 'follows back-to-back events');
+  assert.deepEqual(label([at(540, 555, 'Standup')]), [undefined, '18'], 'a 15-minute event is drawn 14px tall and the label clears it');
+  assert.deepEqual(label([at(660, 690, 'Lunch')]), [undefined, '8'], 'events lower in the block leave the label alone');
+  assert.deepEqual(label([at(565, 600, 'Too close')]), [undefined, '48'], 'an event starting under the label pushes it down too');
+  assert.deepEqual(label([at(510, 750, 'Offsite')]), [' over', '8'], 'covered from before the block: over the event, whose title is above the block');
+  assert.deepEqual(label([at(540, 720, 'Offsite')]), [' over', '18'], 'covered from the block start: over the event, below its title');
+});
+
+test('label spots are found with the measured label height, so a wrapped label moves to a bigger gap', () => {
+  assert.equal(freeSpot(0, 100, [], 25), 0);
+  assert.equal(freeSpot(0, 100, [[10, 20], [0, 5]], 25), 20, 'spans in any order');
+  assert.equal(freeSpot(0, 100, [[0, 30], [10, 20]], 25), 30, 'a span inside another');
+  assert.equal(freeSpot(0, 40, [[0, 20]], 25), null, 'no room before the end');
+  const standupAndPlanning = [[0, 14], [44, 88]];
+  assert.deepEqual(labelPlace(0, 352, standupAndPlanning), { top: 18, over: false }, 'one line fits between them');
+  assert.deepEqual(labelPlace(0, 352, standupAndPlanning, 33), { top: 92, over: false }, 'two lines do not, so it goes below the planning');
+  assert.deepEqual(labelPlace(0, 30, [[-10, 60]], 17), { top: 8, over: true });
+});
+
+test('events keep their whole title for tooltips and screen readers and clamp it to the lines their height allows', () => {
+  const at = (start, end, title) => ({ start: zonedEpoch('2026-11-18', start, 'Europe/Oslo'), end: zonedEpoch('2026-11-18', end, 'Europe/Oslo'), title });
+  const html = weekMarkup({ schedule: schedule(), mode: 'every', monday: '2026-11-16', events: [at(540, 555, 'Team standup'), at(600, 660, 'Weekly planning with the Fernhill leadership team'), at(780, 810, '')] });
+  assert.match(html, /style="top:\d+px;height:14px;--c:#8a8a90" title="Team standup 09:00–09:15"><span class="wk-event-title">Team standup<\/span><span class="sr-only">, 09:00–09:15<\/span>/, 'a short event is one line');
+  assert.match(html, /height:44px;[^"]*" title="Weekly planning with the Fernhill leadership team 10:00–11:00"><span class="wk-event-title" style="-webkit-line-clamp:3">Weekly planning with the Fernhill leadership team<\/span>/, 'an hour has room for three lines');
+  assert.match(html, /title="Busy 13:00–13:30"><span class="wk-event-title">Busy<\/span>/, 'untitled busy time');
+  assert.equal((html.match(/data-on-block/g) || []).length, 3, 'events over a block take its grab cursor');
 });
 
 test('the link times dialog and the Availability page both count hours open next week', () => {
