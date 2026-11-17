@@ -43,10 +43,10 @@ async function open(page,hash='',opts){
 }
 const sidebar=page=>page.getByRole('navigation',{name:'Scheduling'});
 
-test('navigation is Bookings, Links, Availability, then Setup; Bookings is the default page',async({page})=>{
+test('navigation is Bookings, Links, Availability, Activity, then Setup; Bookings is the default page',async({page})=>{
  await open(page);
  await expect(page.getByRole('heading',{name:'Bookings',level:1})).toBeVisible();
- await expect(sidebar(page).getByRole('button')).toHaveText([/^Bookings\s*1$/,'Links','Availability','Integrations']);
+ await expect(sidebar(page).getByRole('button')).toHaveText([/^Bookings\s*1$/,'Links','Availability','Activity','Integrations']);
  await expect(page.locator('.nav-group')).toHaveText('Setup');
  for(const gone of ['Hours','Calendars','Booking stats','Troubleshooting'])await expect(sidebar(page).getByRole('button',{name:gone,exact:true})).toHaveCount(0);
  await page.locator('#account-trigger').click();

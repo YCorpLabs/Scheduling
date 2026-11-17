@@ -46,6 +46,9 @@ async function mock(page,{role='admin',companies=true,authenticated=true,email='
     if(path==='/api/live/integrations/test'){state.deliveries.unshift({id:'dtest',integrationId:body.id,eventId:'e',eventType:'integration.test',state:'queued',attempts:0,nextAttemptAt:Date.now(),lastAttemptAt:null,errorCode:null});return json({ok:true,deliveryId:'dtest',state:'queued'});}
     if(path==='/api/live/integrations/retry'){const d=state.deliveries.find(x=>x.id===body.deliveryId);d.state=body.action==='discard'?'cancelled':'queued';d.errorCode=body.action==='discard'?'operator_discarded':null;return json({ok:true});}
     if(path==='/api/live/operations')return json({issues:[]});
+    if(path==='/api/live/activity')return json({activity:state.activity||[]});
+    if(path==='/api/device/sessions')return json({sessions:state.apps||[]});
+    if(path==='/api/device/revoke'){state.apps=(state.apps||[]).filter(a=>a.id!==body.sessionId);return route.fulfill({status:204});}
     if(path==='/api/live/my-calendar')return json({member:{id:'h_me',email:'ada@example.com'},account:null,calendars:[],schedule:{zone:'UTC',weeklyHours:{},dateOverrides:{}},scheduleConfigured:false,readiness:'not_connected',revision:'rev1'});
     if(path.startsWith('/api/live/my-calendar/events'))return json({events:[],calendars:[]});
     return json({error:'Not mocked'},404);
@@ -332,6 +335,23 @@ test('right after connecting, a test message reports delivery in the dialog and 
   // While the result is still pending, Escape closes the dialog.
   await connected.getByRole('button',{name:'Send again'}).click();await expect.poll(()=>state.deliveries.length).toBe(2);
   await expect(async()=>{await page.keyboard.press('Escape');await expect(connected).toHaveCount(0,{timeout:250});}).toPass({timeout:5000});
+});
+
+test('activity shows what connected apps changed, opens the booking and disconnects an app',async({page})=>{
+  const state=await mock(page,{companies:false});const now=Date.now();
+  state.activity=[{id:'a1',at:now-60000,actor:{kind:'mcp',name:'Claude'},action:'decide_booking',summary:'Approved Personal booking with Guest on 2026-11-18 10:00',target:{type:'booking',id:'b'.repeat(20)}},{id:'a2',at:now-3600000,actor:{kind:'mcp',name:'Claude'},action:'update_hours',summary:'Updated availability: weekly hours',target:{type:'hours',id:'default'}}];
+  state.apps=[{id:'s1',name:'Claude',kind:'mcp',scope:'booking:read booking:settings booking:manage',createdAt:now-86400000,expiresAt:now+86400000},{id:'s2',name:'Email',scope:'booking:read email:tracking',createdAt:now-172800000,expiresAt:now+86400000}];
+  await page.setViewportSize({width:1280,height:900});await page.goto(base+'/studio#activity');
+  await expect(page.locator('h1')).toHaveText('Activity');await expect(nav(page).getByRole('button',{name:'Activity'})).toHaveAttribute('aria-current','page');
+  await expect(page.locator('.activity-summary')).toHaveText(['Approved Personal booking with Guest on 2026-11-18 10:00','Updated availability: weekly hours']);
+  await expect(page.locator('.activity-endpoint code')).toHaveText(base+'/mcp');
+  await expect(page.locator('.activity-apps .lk-meta')).toHaveText([/^MCP · Full access · Connected/,/^Desktop app · Read only · Connected/]);
+  await page.screenshot({path:`${shots}/activity.png`,fullPage:true});
+  await page.getByRole('button',{name:/Approved Personal booking/}).click();await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Disconnect Claude'}).click();await page.getByRole('dialog',{name:'Disconnect Claude?'}).getByRole('button',{name:'Disconnect'}).click();
+  await expect(page.getByRole('button',{name:'Disconnect Claude'})).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/device/revoke').map(r=>r.body)).toEqual([{sessionId:'s1'}]);
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/activity-mobile.png`,fullPage:true});
+  await page.getByRole('navigation',{name:'Sections'}).getByRole('button',{name:'More'}).click();await expect(page.locator('#account-menu').getByRole('button',{name:'Activity'})).toBeVisible();
 });
 
 test('integration cards open the selected destination with the webhook gate intact',async({page})=>{

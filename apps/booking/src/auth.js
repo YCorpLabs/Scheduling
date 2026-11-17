@@ -218,7 +218,7 @@ export async function oauthStart(request,env) {
   if(own&&(!connect||!workspaceId))throw new HttpError(400,'Choose a company calendar connection.');
   if(workspaceId){if(!connect)throw new HttpError(400,'Choose a calendar connection.');const access=await workspaceAccess(env,existing,workspaceId);if(own){const member=await ownCalendarMember(env,existing,workspaceId);ownerMember={...member,fenceEpoch:await env.LIVE_HOSTS.getByName(access.hostId).memberCalendarEpoch(member.id)};}else if(!access.capabilities.manageCalendars)throw new HttpError(403,'An admin must connect this workspace calendar.');targetHostId=access.hostId;}
   const state=randomToken(),binding=randomToken(),verifier=randomToken();
-  const oauthName='oauth:'+await sha256(state),oauthStore=env.AUTH.getByName(oauthName),oauthBody={binding:await sha256(binding),verifier,accountGeneration:0,targetGeneration:0,flow:connect?'calendar':'identity',hostId:connect?targetHostId:null,...(workspaceId?{workspaceId,initiatorHostId:existing.hostId}:{}),...(ownerMember?{ownerMember}:{}),returnTo:url.searchParams.get('returnTo')==='device'?'/device':'/studio'};
+  const oauthName='oauth:'+await sha256(state),oauthStore=env.AUTH.getByName(oauthName),oauthBody={binding:await sha256(binding),verifier,accountGeneration:0,targetGeneration:0,flow:connect?'calendar':'identity',hostId:connect?targetHostId:null,...(workspaceId?{workspaceId,initiatorHostId:existing.hostId}:{}),...(ownerMember?{ownerMember}:{}),returnTo:{device:'/device',mcp:'/oauth/authorize'}[url.searchParams.get('returnTo')]||'/studio'};
   if(existing?.hostId)await withLifecycleAdmission(env,existing.hostId,'oauth_state',async life=>{await indexAccountObject(env,existing.hostId,oauthName,Date.now()+600000,life);await life.write(()=>oauthStore.putEphemeral?oauthStore.putEphemeral(oauthBody,600000):oauthStore.put(oauthBody,600000));},{cleanup:async error=>error instanceof HttpError&&error.status<500});
   else await (oauthStore.putEphemeral?oauthStore.putEphemeral(oauthBody,600000):oauthStore.put(oauthBody,600000));
   const location=authorizationUrl({clientId:env.GOOGLE_CLIENT_ID,redirectUri:originFor(env)+'/auth/google/callback',state,codeChallenge:await sha256(verifier),identityOnly:!connect});
@@ -244,7 +244,7 @@ export async function oauthCallback(request,env) {
   if(!legacy&&!['identity','calendar'].includes(saved.flow))return expiredSignIn(env);
   if((saved.flow==='calendar'&&!saved.hostId)||(saved.flow==='identity'&&saved.hostId))return expiredSignIn(env);
   if(saved.hostId&&!await mayFinishConnection(request,env,saved))return new Response('Sign in again to connect this calendar.',{status:401});
-  if(url.searchParams.has('error'))return new Response(null,{status:303,headers:{Location:originFor(env)+(saved.returnTo==='/device'?'/device':'/studio')+'?connection=declined','Set-Cookie':cookie('email_booking_oauth','',originFor(env),0,'/auth')}});
+  if(url.searchParams.has('error'))return new Response(null,{status:303,headers:{Location:originFor(env)+(['/device','/oauth/authorize'].includes(saved.returnTo)?saved.returnTo:'/studio')+'?connection=declined','Set-Cookie':cookie('email_booking_oauth','',originFor(env),0,'/auth')}});
   const code=url.searchParams.get('code');if(!code||code.length>4096)return new Response('Invalid sign-in response',{status:400});
   const tokens=await exchangeCode({clientId:env.GOOGLE_CLIENT_ID,clientSecret:env.GOOGLE_CLIENT_SECRET,redirectUri:originFor(env)+'/auth/google/callback',code,codeVerifier:saved.verifier});
   const user=await getUserInfo(tokens.access_token);if(!user.sub||!user.email||user.email_verified!==true)throw Error('A verified Google account is required.');
@@ -268,7 +268,7 @@ export async function oauthCallback(request,env) {
   if(calendarFlow){checkedHostResult(await write(()=>host.connectAccount({accountId:user.sub,email:user.email,tokens,credentialOwnerId,...(saved.ownerMember?{ownerMember:saved.ownerMember}:{})})));}
 
   await write(()=>env.AUTH.getByName('host-registry').register(hostId));
-  const headers=new Headers({Location:originFor(env)+(saved.returnTo==='/device'?'/device':'/studio')+(saved.workspaceId?'?workspace='+encodeURIComponent(saved.workspaceId)+(saved.ownerMember?'&calendar=connected':''):''),'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
+  const headers=new Headers({Location:originFor(env)+(['/device','/oauth/authorize'].includes(saved.returnTo)?saved.returnTo:'/studio')+(saved.workspaceId?'?workspace='+encodeURIComponent(saved.workspaceId)+(saved.ownerMember?'&calendar=connected':''):''),'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
   // Connecting a calendar is authorized by the existing owner session, not a
   // fresh identity login. Never mint a replacement bearer: revocation during
   // provider/storage I/O must remain effective, including legacy owner states.

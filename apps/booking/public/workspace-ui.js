@@ -18,10 +18,10 @@ const fallbackCaps=role=>({manageSettings:role==='owner'||role==='admin',manageM
 export const can=(workspace,capability)=>!!workspace&&(workspace.personal||!!(workspace.capabilities||fallbackCaps(workspace.role))[capability]);
 export const canAdminister=workspace=>can(workspace,'manageMembers');
 export const inviteRoles=workspace=>ASSIGNABLE_ROLES.filter(r=>r!=='admin'||can(workspace,'grantAdmin'));
-const PERSONAL_SECTIONS=['Bookings','Meetings','Availability','Integrations','Analytics','Status'];
+const PERSONAL_SECTIONS=['Bookings','Meetings','Availability','Activity','Integrations','Analytics','Status'];
 export function sectionsFor(workspace){
   if(!workspace||workspace.personal)return PERSONAL_SECTIONS;
-  if(can(workspace,'manageSettings'))return ['Bookings','Meetings','Availability','Team',...(can(workspace,'manageIntegrations')?['Integrations']:[]),'Analytics','Status'];
+  if(can(workspace,'manageSettings'))return ['Bookings','Meetings','Availability','Activity','Team',...(can(workspace,'manageIntegrations')?['Integrations']:[]),'Analytics','Status'];
   return ['Bookings',...(can(workspace,'manageOwnCalendar')?['Availability']:[]),'Team','Analytics'];
 }
 export const PERSONAL_FALLBACK=Object.freeze({id:'personal',name:'Your profile',role:'owner',personal:true});

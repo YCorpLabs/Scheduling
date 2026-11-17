@@ -6,7 +6,8 @@ import {readFile} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {chromium,expect} from '@playwright/test';
-const origin='http://127.0.0.1:8804',publicRoot=resolve(new URL('../public',import.meta.url).pathname);
+import {sha256} from '../src/crypto.js';
+const port=Number(process.env.BOOKING_E2E_PORT||8804),origin='http://127.0.0.1:'+port,publicRoot=resolve(new URL('../public',import.meta.url).pathname);
 test('real company UI creates, invites, delivers a synthetic notification and revokes access',{timeout:90000},async()=>{
  let identity='owner@example.test';const sent=[];
  const asset=async request=>{
@@ -15,7 +16,7 @@ test('real company UI creates, invites, delivers a synthetic notification and re
   try{return new Response(await readFile(file),{headers:{'content-type':{'.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.html':'text/html'}[extname(file)]||'application/octet-stream'}});}
   catch{return new Response(await readFile(resolve(publicRoot,'index.html')),{headers:{'content-type':'text/html'}});}
  };
- const mf=new Miniflare(convertV4MiniflareOptions({host:'127.0.0.1',port:8804,workers:[{name:'company-browser',modules:true,scriptPath:new URL('../dist/worker.js',import.meta.url).pathname,compatibilityDate:'2026-11-10',durableObjects:{HOSTS:{className:'BookingHost',useSQLite:true},LIVE_HOSTS:{className:'LiveBookingHost',useSQLite:true},AUTH:{className:'AuthStore',useSQLite:true}},bindings:{LIVE_ENABLED:'true',PUBLIC_ORIGIN:origin,GOOGLE_CLIENT_ID:'fixture',GOOGLE_CLIENT_SECRET:'fixture',TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,12).toString('base64')},serviceBindings:{ASSETS:asset},outboundService:async request=>{
+ const mf=new Miniflare(convertV4MiniflareOptions({host:'127.0.0.1',port,workers:[{name:'company-browser',modules:true,scriptPath:new URL('../dist/worker.js',import.meta.url).pathname,compatibilityDate:'2026-11-10',durableObjects:{HOSTS:{className:'BookingHost',useSQLite:true},LIVE_HOSTS:{className:'LiveBookingHost',useSQLite:true},AUTH:{className:'AuthStore',useSQLite:true}},bindings:{LIVE_ENABLED:'true',PUBLIC_ORIGIN:origin,GOOGLE_CLIENT_ID:'fixture',GOOGLE_CLIENT_SECRET:'fixture',TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,12).toString('base64')},serviceBindings:{ASSETS:asset},outboundService:async request=>{
   const url=new URL(request.url);
   if(url.hostname==='oauth2.googleapis.com')return Response.json({access_token:'fixture',expires_in:3600,scope:'openid email profile'});
   if(url.hostname==='openidconnect.googleapis.com')return Response.json({sub:identity,email:identity,email_verified:true,name:identity.split('@')[0]});
@@ -40,6 +41,18 @@ test('real company UI creates, invites, delivers a synthetic notification and re
   await connected.getByRole('button',{name:'Done',exact:true}).click();await expect(connected).toHaveCount(0);await expect(admin.getByRole('button',{name:'Edit Team notifications',exact:true})).toBeVisible();
   await admin.getByRole('button',{name:'More for Team notifications',exact:true}).click();await admin.getByRole('menuitem',{name:'Send test',exact:true}).click();await expect(admin.locator('#host-status')).toHaveText('Test delivered to Team notifications');assert.equal(sent.length,2);await admin.locator('summary',{hasText:'Recent deliveries'}).click();await expect(admin.locator('.delivery-entry .booking-badge',{hasText:'Delivered'})).toHaveCount(2);
   await admin.setViewportSize({width:390,height:844});assert.ok(await admin.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await admin.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/company-ui-real-worker-mobile.png`,fullPage:true});
+  // A real browser approves an MCP connection: the consent form must post with a real Origin.
+  // The loopback redirect is served by this local Worker, so nothing leaves the machine.
+  const mcpRedirect=origin+'/mcp-test-callback';
+  const mcpClient=await admin.evaluate(async uri=>(await fetch('/oauth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({client_name:'Claude Code',redirect_uris:[uri]})})).json(),mcpRedirect);
+  const mcpVerifier='m'.repeat(48);
+  await admin.goto(origin+'/oauth/authorize?'+new URLSearchParams({response_type:'code',client_id:mcpClient.client_id,redirect_uri:mcpRedirect,code_challenge:await sha256(mcpVerifier),code_challenge_method:'S256',state:'s1'}));
+  await expect(admin.getByRole('heading',{name:'Allow Claude Code to manage your scheduling?'})).toBeVisible();await admin.getByRole('button',{name:'Allow'}).click();
+  await admin.waitForURL(/\/mcp-test-callback\?/);const mcpBack=new URL(admin.url());assert.equal(mcpBack.searchParams.get('state'),'s1');assert.ok(mcpBack.searchParams.get('code'));
+  const mcpToken=await (await mf.dispatchFetch(origin+'/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code:mcpBack.searchParams.get('code'),code_verifier:mcpVerifier,redirect_uri:mcpRedirect,client_id:mcpClient.client_id}).toString()})).json();
+  const mcpOverview=await (await mf.dispatchFetch(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+mcpToken.access_token},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'get_overview',arguments:{}}})})).json();
+  assert.equal(mcpOverview.result.structuredContent.account,'admin@example.test');
+  await admin.goto(origin+'/studio');await expect(admin.locator('#workspace-trigger')).toBeVisible();
   await owner.getByRole('button',{name:'Team',exact:true}).click();await owner.getByRole('button',{name:'Manage admin@example.test',exact:true}).click();const manage=owner.getByRole('dialog',{name:'Manage admin@example.test'});await manage.getByRole('button',{name:/Remove from/}).click();await manage.getByRole('button',{name:'Remove member',exact:true}).click();await expect(manage).toHaveCount(0);
   await admin.reload();await expect(admin.locator('#workspace-trigger')).toContainText('admin');await admin.locator('#workspace-trigger').click();await expect(admin.getByRole('menuitemradio',{name:/Fixture Company/})).toHaveCount(0);await owner.setViewportSize({width:375,height:812});await owner.goto(origin+'/auth/google/callback');await expect(owner.getByRole('heading',{name:'Sign-in expired',exact:true})).toBeVisible();await expect(owner.getByRole('link',{name:'Sign in with Google',exact:true})).toHaveAttribute('href','/auth/google');assert.ok(await owner.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await owner.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/company-expired-real-worker-mobile.png`,fullPage:true});
  }finally{await browser?.close();await mf.dispose();}
