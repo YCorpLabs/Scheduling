@@ -6,6 +6,8 @@ import {AuthStore,configured,originFor,localOrigin,session,oauthStart,oauthCallb
 import {handleTracking} from './tracking.js';
 import {exportAccount,exportWorkspace} from './export.js';
 import {handleDevice,authenticateDevice} from './device.js';
+import {handleOAuth} from './mcp-oauth.js';
+import {handleMcp} from './mcp.js';
 import {notificationConfigured} from './notifications.js';
 import {verifiedIdentity} from './identity.js';
 import {sha256} from './crypto.js';
@@ -60,6 +62,8 @@ export default {
         if(/^\/api\/device\/(settings(?:\/preview)?|bookings|analytics|availability|calendars)$/.test(path)){
           await limit(request,env,'browse');
           const device=await authenticateDevice(request,env);if(!device)throw new HttpError(401,'Desktop session expired or was revoked.');
+          // MCP connections act through /mcp so every change is attributed and logged.
+          if(device.kind==='mcp')throw new HttpError(403,'Use the MCP server for this connection.');
           const host=env.LIVE_HOSTS.getByName(device.hostId),settingsWrite=device.scope.split(' ').includes('booking:settings');
           const needSettings=()=>response({error:'Approve scheduling settings access to continue.',code:'settings_permission_required'},403);
           if(path==='/api/device/settings/preview'&&request.method==='POST'){
@@ -80,6 +84,12 @@ export default {
           throw new HttpError(405,'Preview settings with a JSON POST request.');
         }
         return await handleDevice(request,env,{getSession:req=>session(req,env)});
+      }
+      // Remote MCP and its OAuth endpoints. Bearer tokens only; the session cookie is used solely on the consent page.
+      if(path==='/mcp'||path.startsWith('/oauth/')||path.startsWith('/.well-known/oauth-')||path==='/.well-known/openid-configuration'){
+        if(!configured(env))throw new HttpError(503,'Booking service is not configured yet.');
+        if(url.origin!==originFor(env))throw new HttpError(421,'Use the configured booking address.');
+        return path==='/mcp'?await handleMcp(request,env,{origin:originFor(env)}):await handleOAuth(request,env,{origin:originFor(env),getSession:req=>session(req,env)});
       }
       if(local&&!path.startsWith('/auth/')&&!path.startsWith('/api/live/')&&!path.startsWith('/api/public/')&&!path.startsWith('/api/manage/'))return demo.fetch(request,env,ctx);
       if(!path.startsWith('/api/')&&!path.startsWith('/auth/'))return secureAsset(await env.ASSETS.fetch(request),request);
@@ -144,6 +154,7 @@ export default {
           if(path==='/api/live/integrations')return result(await host.integrationStatus());
           if(path==='/api/live/availability')return result(await host.availability(url.searchParams.get('type')||'intro',{preview:true,duration:requestedDuration(url)}));
           if(path==='/api/live/analytics')return result(await host.analytics());
+          if(path==='/api/live/activity')return result(await host.activity({limit:100}));
           // Owner-only aggregate status; never exposes guest data, capabilities or payloads.
           if(path==='/api/live/operations')return result(await host.operationalStatus());
           if(path==='/api/live/bookings')return result(projectWorkspaceBookingList(await host.listBookings({includeNotifications:true}),access));

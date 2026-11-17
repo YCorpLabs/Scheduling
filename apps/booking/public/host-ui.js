@@ -27,6 +27,7 @@ import { availabilityPageMarkup, bindAvailabilityPage, currentMonday, zoneLabel 
 import { addDays, weeklySummary, zonedEpoch } from "/week-calendar.js";
 import { WORKSPACE_HEADER, resolveWorkspaces, readStoredWorkspace, storeWorkspace, clearStoredWorkspace, captureInviteToken, stashInviteToken, takePendingInvite, clearPendingInvite, roleLabel, switcherMarkup, bindSwitcher, showCreateWorkspace, sectionsFor, can, canAdminister, cleanWorkspace, teamMarkup, bindTeam, showInviteDialog, showInviteAcceptance } from "/workspace-ui.js";
 import { integrationsMarkup, bindIntegrations, integrationsHeading } from "/integrations-ui.js";
+import { activityMarkup, bindActivity, loadActivity } from "/activity-ui.js";
 import { normalizeBrand, brandMark, studioName, legalLinksMarkup } from "/brand.js";
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 let activeWorkspace = null, onCompanyRefusal = () => {
@@ -63,9 +64,9 @@ export async function hostUI(bootstrap) {
     q.delete("workspace");
     history.replaceState(null, "", location.pathname + (q.size ? "?" + q : "") + location.hash);
   }
-  let ws = resolveWorkspaces(null), personalName = "", loadError = "", accessNotice = null, generation = 0, teamData = null, teamLoading = false, teamError = "", intData = null, intLoading = false, intError = "", checkingAccess = false;
+  let ws = resolveWorkspaces(null), personalName = "", loadError = "", accessNotice = null, generation = 0, teamData = null, teamLoading = false, teamError = "", intData = null, intLoading = false, intError = "", actData = null, actLoading = false, actError = "", checkingAccess = false;
   const root = document.querySelector("#app");
-  const hashSection = (hash) => ({ "#calendars": "Availability", "#availability": "Availability", "#analytics": "Analytics", "#stats": "Analytics", "#status": "Status", "#team": "Team", "#integrations": "Integrations", "#links": "Meetings" })[hash] || (/^#link=/.test(hash) ? "Meetings" : "Bookings");
+  const hashSection = (hash) => ({ "#calendars": "Availability", "#availability": "Availability", "#analytics": "Analytics", "#stats": "Analytics", "#status": "Status", "#team": "Team", "#integrations": "Integrations", "#activity": "Activity", "#links": "Meetings" })[hash] || (/^#link=/.test(hash) ? "Meetings" : "Bookings");
   let settings, calendars = [], section = hashSection(location.hash), selected = 0, editing = !!initialLinkId, message = "", bookings = [], bookingView = "home", bookingQuery = "", bookingSearching = false, deciding = {}, bookingLoading = false, bookingLoaded = false, reconciliationIssues = [], notificationIssues = [], analyticsData = null, analyticsMetric = "pageViews", analyticsLoading = false, dirty = false, calendarsLoaded = false, savedTypeIds = new Set(), refreshTeamCalendars = () => {
   }, opsData = null, opsLoading = false, opsError = "";
   let profileExport = null;
@@ -218,6 +219,7 @@ export async function hostUI(bootstrap) {
     if (section === "Status") await refreshOperations();
     if (section === "Team") await refreshTeam();
     if (section === "Integrations") await refreshIntegrations();
+    if (section === "Activity") await refreshActivity();
     if (section === "Bookings") {
       await refreshBookings();
       if (first && initialBookingId && !linkDenied) await openBooking(initialBookingId, null);
@@ -303,6 +305,7 @@ export async function hostUI(bootstrap) {
     teamData = null;
     teamError = "";
     intData = null;
+    actData = null;
     intError = "";
     selected = 0;
     dirty = false;
@@ -375,7 +378,7 @@ export async function hostUI(bootstrap) {
       checkingAccess = false;
     }
   };
-  const hashFor = (next) => next === "Meetings" ? editing && settings?.meetingTypes[selected] ? "#link=" + encodeURIComponent(settings.meetingTypes[selected].id) : "#links" : { Availability: "#availability", Analytics: "#stats", Status: "#status", Team: "#team", Integrations: "#integrations" }[next] || location.pathname;
+  const hashFor = (next) => next === "Meetings" ? editing && settings?.meetingTypes[selected] ? "#link=" + encodeURIComponent(settings.meetingTypes[selected].id) : "#links" : { Availability: "#availability", Analytics: "#stats", Status: "#status", Team: "#team", Integrations: "#integrations", Activity: "#activity" }[next] || location.pathname;
   const hostId = () => settings?.hostId || bootstrap.hostId;
   const link = (t) => `${location.origin}/b/${hostId()}/${t.slug}`;
   const sectionLabel = (name) => ({ Meetings: "Links", Analytics: "Stats", Status: "Troubleshooting" })[name] || name;
@@ -444,7 +447,7 @@ export async function hostUI(bootstrap) {
       loadPreview: async (duration) => draftPreview(settings, previewDraft(draft), Date.now(), duration)
     });
   }
-  const icons = { Availability: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18m-13 5 2 2 5-5"/>', Team: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.2A5 5 0 0 1 20.5 19"/>', Integrations: '<path d="M9 7V4M15 7V4"/><rect x="6" y="7" width="12" height="6" rx="2"/><path d="M12 13v3a4 4 0 0 1-4 4"/>', Status: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>', Analytics: '<path d="M4 20h16M7 16v-5m5 5V5m5 11V8"/>', Meetings: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5"/>', Calendars: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18"/>', Bookings: '<path d="M8 3h8v4H8z"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 14l3 3 5-6"/>', arrow: '<path d="m9 5 7 7-7 7"/>', refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 18 17"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>' };
+  const icons = { Activity: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', Availability: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18m-13 5 2 2 5-5"/>', Team: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.2A5 5 0 0 1 20.5 19"/>', Integrations: '<path d="M9 7V4M15 7V4"/><rect x="6" y="7" width="12" height="6" rx="2"/><path d="M12 13v3a4 4 0 0 1-4 4"/>', Status: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>', Analytics: '<path d="M4 20h16M7 16v-5m5 5V5m5 11V8"/>', Meetings: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5"/>', Calendars: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18"/>', Bookings: '<path d="M8 3h8v4H8z"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 14l3 3 5-6"/>', arrow: '<path d="m9 5 7 7-7 7"/>', refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 18 17"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>' };
   const icon = (name) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.Bookings}</svg>`;
   const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
   const zone = () => myAvailability()?.zone || browserZone();
@@ -781,6 +784,7 @@ export async function hostUI(bootstrap) {
     if (section === "Status") return operationsMarkup(opsData, { loading: opsLoading, error: opsError, formatTime: time });
     if (section === "Team") return `<div class="team-workspace">${teamMarkup(teamData, { workspace: ws.active, email: bootstrap.email, loading: teamLoading, error: teamError, formatDate: (ms) => fmt(ms, { month: "short", day: "numeric" }) })}${companyCalendarsMarkup()}${teamData ? profileExportMarkup(ws.active) : ""}</div>`;
     if (section === "Integrations") return integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time });
+    if (section === "Activity") return activityMarkup(actData, { loading: actLoading, error: actError, formatTime: time, formatDate: (ms) => fmt(ms, { month: "short", day: "numeric" }), origin: location.origin, showAccount: !ws.active.personal });
     return bookingList(notices);
   }
   // Calendars an admin connected for the whole team (from before members had their own).
@@ -802,13 +806,13 @@ export async function hostUI(bootstrap) {
     const company = ws.active.personal ? null : ws.active, profile = settings?.profile || {};
     document.title = (section === "Meetings" && editing && settings?.meetingTypes[selected] ? settings.meetingTypes[selected].title : sectionLabel(section)) + " · " + (company ? company.name + " · " : "") + studioName(brand);
     const name = company ? personalName : profile.name, avatar = company ? "" : profile.avatarImage;
-    const requests = bookings.filter(isRequest).length, primary = allowed().filter((x) => ["Bookings", "Meetings", "Availability"].includes(x)), setupSections = allowed().filter((x) => ["Team", "Integrations"].includes(x));
+    const requests = bookings.filter(isRequest).length, primary = allowed().filter((x) => ["Bookings", "Meetings", "Availability", "Activity"].includes(x)), setupSections = allowed().filter((x) => ["Team", "Integrations"].includes(x));
     const navButton = (x) => `<button data-section="${x}" ${section === x ? 'aria-current="page"' : ""} class="${section === x ? "active" : ""}">${icon(x)}<span>${sectionLabel(x)}</span>${x === "Bookings" && requests ? `<span class="nav-count" aria-label="${requests} waiting for your OK">${requests}</span>` : ""}</button>`;
     const ownHead = section === "Bookings" || section === "Meetings";
     const notices = `${accessNotice ? `<div class="setup-callout workspace-notice" role="alert"><div><strong>You no longer have access to ${esc(accessNotice.name)}</strong></div><button class="secondary compact-button" data-workspace-personal>Back to your profile</button></div>` : ""}${reconnectNotice()}<p id="host-status" class="${message ? "has-message" : ""}" role="status">${esc(message)}</p>`;
     const heading = section === "Analytics" && allowed().includes("Meetings") ? `<div><button type="button" class="back-to-links" data-section="Meetings">← Links</button><h1>Stats</h1></div>` : `<div><h1>${sectionLabel(section)}</h1></div>`;
-    const moreSections = [...setupSections, ...allowed().includes("Analytics") ? ["Analytics"] : []].map((x) => [x, sectionLabel(x)]);
-    root.innerHTML = `<div class="host-console"><aside class="host-nav"><div class="host-brand"><a class="wordmark" href="/studio"><span class="host-logo">${esc(brandMark(brand))}</span>${esc(brand.productName)}</a>${switcherMarkup({ ...ws, workspaces: ws.workspaces.map((w) => w.personal ? { ...w, name: personalName || bootstrap.email || "Your profile" } : w), active: { ...ws.active, ...ws.active.personal ? { name: personalName || bootstrap.email || "Your profile" } : {}, avatarImage: profile.avatarImage } })}</div><nav aria-label="Scheduling">${primary.map(navButton).join("")}${setupSections.length ? `<p class="nav-group" aria-hidden="true">Setup</p>${setupSections.map(navButton).join("")}` : ""}</nav>${accountMenuMarkup({ name: name || "Your account", email: bootstrap.email, avatar, editProfile: can(ws.active, "manageSettings") && !!settings, editPicture: !!settings && !company && can(ws.active, "manageSettings"), troubleshooting: allowed().includes("Status"), issues: attentionCount(opsData), calendarAccess: contributions.length > 0, dark: document.documentElement.dataset.theme === "dark", sections: moreSections })}<div class="host-legal">${legalLinksMarkup(brand)}</div></aside><main class="host-content" id="main">${ownHead ? sectionBody(notices) : `<header class="host-heading">${heading}${headingAction()}</header>${notices}${sectionBody()}`}</main><nav class="tabbar" aria-label="Sections">${primary.map((x) => `<button type="button" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}>${icon(x)}<span>${sectionLabel(x)}</span>${x === "Bookings" && requests ? `<em aria-label="${requests} waiting">${requests}</em>` : ""}</button>`).join("")}<button type="button" data-more aria-label="More">${icon("more")}<span>More</span></button></nav></div>`;
+    const moreSections = [...allowed().includes("Activity") ? ["Activity"] : [], ...setupSections, ...allowed().includes("Analytics") ? ["Analytics"] : []].map((x) => [x, sectionLabel(x)]);
+    root.innerHTML = `<div class="host-console"><aside class="host-nav"><div class="host-brand"><a class="wordmark" href="/studio"><span class="host-logo">${esc(brandMark(brand))}</span>${esc(brand.productName)}</a>${switcherMarkup({ ...ws, workspaces: ws.workspaces.map((w) => w.personal ? { ...w, name: personalName || bootstrap.email || "Your profile" } : w), active: { ...ws.active, ...ws.active.personal ? { name: personalName || bootstrap.email || "Your profile" } : {}, avatarImage: profile.avatarImage } })}</div><nav aria-label="Scheduling">${primary.map(navButton).join("")}${setupSections.length ? `<p class="nav-group" aria-hidden="true">Setup</p>${setupSections.map(navButton).join("")}` : ""}</nav>${accountMenuMarkup({ name: name || "Your account", email: bootstrap.email, avatar, editProfile: can(ws.active, "manageSettings") && !!settings, editPicture: !!settings && !company && can(ws.active, "manageSettings"), troubleshooting: allowed().includes("Status"), issues: attentionCount(opsData), calendarAccess: contributions.length > 0, dark: document.documentElement.dataset.theme === "dark", sections: moreSections })}<div class="host-legal">${legalLinksMarkup(brand)}</div></aside><main class="host-content" id="main">${ownHead ? sectionBody(notices) : `<header class="host-heading">${heading}${headingAction()}</header>${notices}${sectionBody()}`}</main><nav class="tabbar" aria-label="Sections">${primary.filter((x) => x !== "Activity").map((x) => `<button type="button" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}>${icon(x)}<span>${sectionLabel(x)}</span>${x === "Bookings" && requests ? `<em aria-label="${requests} waiting">${requests}</em>` : ""}</button>`).join("")}<button type="button" data-more aria-label="More">${icon("more")}<span>More</span></button></nav></div>`;
     bind();
     alignNavigation();
     if (accountMenuWasOpen) accountOpener()?.focus({ preventScroll: true });
@@ -856,6 +860,25 @@ export async function hostUI(bootstrap) {
         teamLoading = false;
         render();
         if (restore) document.getElementById(restore)?.focus();
+      }
+    }
+  }
+  async function refreshActivity() {
+    const gen = generation;
+    actLoading = true;
+    if (!actData) render();
+    try {
+      const result = await loadActivity(api);
+      if (gen !== generation) return;
+      actData = result;
+      actError = "";
+    } catch (e) {
+      if (gen !== generation) return;
+      actError = e.message || "Activity could not be loaded.";
+    } finally {
+      if (gen === generation) {
+        actLoading = false;
+        render();
       }
     }
   }
@@ -956,6 +979,7 @@ export async function hostUI(bootstrap) {
     if (next === "Analytics") await refreshAnalytics();
     if (next === "Team") await refreshTeam();
     if (next === "Integrations") await refreshIntegrations();
+    if (next === "Activity") await refreshActivity();
     if (next === "Availability") await refreshAvailability();
   }
   async function openBooking(id, trigger, { confirmCancel = false, reschedule = false } = {}) {
@@ -1374,6 +1398,7 @@ export async function hostUI(bootstrap) {
     }
     bindProfileExport();
     if (section === "Integrations" && settings) bindIntegrations(main, { api, getData: () => intData, reload: refreshIntegrations, status });
+    if (section === "Activity" && settings) bindActivity(main, { data: () => actData, reload: refreshActivity, status, openBooking });
   }
   // ----- Bookings -----
   function bindBookings() {

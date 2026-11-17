@@ -6,7 +6,10 @@ import {brandFromEnv,brandLabel,brandMark,escapeHTML} from '../public/brand.js';
 
 const GRANT_MS=10*60_000,TOKEN_MS=30*86_400_000,POLL_MS=5_000,SCOPE='booking:read email:tracking';
 const SETTINGS_SCOPE=SCOPE+' booking:settings';
-const validScopes=new Set(['booking:read',SCOPE,SETTINGS_SCOPE]);
+// MCP clients connected through OAuth: read, change settings and act on bookings and integrations.
+export const AGENT_SCOPE='booking:read booking:settings booking:manage';
+const validScopes=new Set(['booking:read',SCOPE,SETTINGS_SCOPE,AGENT_SCOPE]);
+const writesSettings=scope=>scope.split(' ').includes('booking:settings');
 const grantScope=grant=>grant.scope??SCOPE;
 const USER_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const secureHeaders={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"};
@@ -43,9 +46,37 @@ export async function authenticateDevice(request,env){
   const generation=recordGeneration(credential.accountGeneration);if(!await lifecycleActive(env,credential.hostId,generation))return null;
   const state=await registry(env,credential.hostId).get();
   const session=state?.sessions?.find(s=>s.id===credential.id&&s.tokenHash===tokenHash&&s.expiresAt>Date.now()&&(s.scope===undefined||s.scope===credential.scope));
-  if(credential.scope===SETTINGS_SCOPE&&session?.scope!==SETTINGS_SCOPE)return null;
+  if(writesSettings(credential.scope)&&session?.scope!==credential.scope)return null;
   if(!session||(recordGeneration(session.accountGeneration))!==generation||!await lifecycleActive(env,credential.hostId,generation))return null;
-  return session?{hostId:credential.hostId,name:session.name,scope:credential.scope,expiresAt:credential.expiresAt,sessionId:session.id}:null;
+  return session?{hostId:credential.hostId,name:session.name,scope:credential.scope,expiresAt:credential.expiresAt,sessionId:session.id,...(session.kind?{kind:session.kind}:{}),...(session.accountEmail?{email:session.accountEmail}:{})}:null;
+}
+/** Consumes an approved grant once and issues its revocable bearer. Desktop linking and OAuth
+ * authorization codes both end here, so every credential lands in the same host registry. */
+export async function exchangeApprovedGrant(env,store,grant){
+  const generation=recordGeneration(grant.accountGeneration);let issued;
+  // Reconnecting the same MCP client replaces its earlier session instead of adding another.
+  const sameClient=s=>grant.kind==='mcp'&&s.kind==='mcp'&&s.clientHash&&s.clientHash===grant.clientHash;
+  const full=sessions=>sessions.filter(s=>!sameClient(s)).length>=20;
+  return await withLifecycleAdmission(env,grant.hostId,'device_exchange',async life=>{const {assertActive,write}=life;await assertActive();
+  // Check capacity before the one-time grant is spent, so a full registry never burns it.
+  if(full(((await registry(env,grant.hostId).get())?.sessions||[]).filter(s=>s.expiresAt>Date.now())))throw Object.assign(new HttpError(409,'Revoke an existing desktop session before linking another.'),{code:'session_limit'});
+  if(!await write(()=>store.compareAndSwap(grant.version,{...grant,version:grant.version+1,status:'consumed'},grant.expiresAt-Date.now())))throw new HttpError(409,'Desktop link was already exchanged.');
+  const scope=grantScope(grant);if(!validScopes.has(scope))throw new HttpError(400,'Unsupported desktop permissions.');
+  const accessToken=randomToken(),tokenHash=await sha256(accessToken),id=crypto.randomUUID(),expiresAt=Date.now()+TOKEN_MS;issued={tokenHash,id};
+  const extra={...(grant.kind?{kind:grant.kind}:{}),...(grant.accountEmail?{accountEmail:grant.accountEmail}:{}),...(grant.kind==='mcp'&&grant.clientHash?{clientHash:grant.clientHash}:{})};
+  await assertActive();await updateRegistry(env,grant.hostId,sessions=>{if(full(sessions))throw Object.assign(new HttpError(409,'Revoke an existing desktop session before linking another.'),{code:'session_limit'});return [...sessions.filter(s=>!sameClient(s)),{id,name:grant.name,tokenHash,scope,accountGeneration:generation,createdAt:Date.now(),expiresAt,...extra}];},life);
+  await indexAccountObject(env,grant.hostId,'desktop-token:'+tokenHash,expiresAt,life);
+  await assertActive();await write(()=>env.AUTH.getByName('desktop-token:'+tokenHash).put({id,hostId:grant.hostId,scope,expiresAt,accountGeneration:generation},TOKEN_MS));
+  return {accessToken,expiresAt,scope,expiresIn:TOKEN_MS/1000};
+  },{generation,cleanup:async error=>{if(issued){await env.AUTH.getByName('desktop-token:'+issued.tokenHash).take();await updateRegistry(env,grant.hostId,sessions=>sessions.filter(s=>s.id!==issued.id));}return error instanceof HttpError&&error.status<500;}});
+}
+/** Records a grant the signed-in user approved in the browser, owned and indexed like a device grant. */
+export async function approveGrantForUser(env,user,deviceHash,body){
+  const store=env.AUTH.getByName('device-grant:'+deviceHash);
+  return await withLifecycleAdmission(env,user.hostId,'device_approve',async life=>{
+    await indexAccountObject(env,user.hostId,'device-grant:'+deviceHash,body.expiresAt,life);
+    if(!await life.write(()=>store.compareAndSwap(null,{...body,version:1,status:'approved',hostId:user.hostId,accountGeneration:0},body.expiresAt-Date.now())))throw new HttpError(409,'Authorization changed. Please retry.');
+  },{cleanup:async error=>{const current=await store.get();if(current?.status==='approved'&&current.hostId===user.hostId)await store.compareAndSwap(current.version,{...current,version:current.version+1,status:'revoked'},current.expiresAt-Date.now());return error instanceof HttpError&&error.status<500;}});
 }
 export async function handleDevice(request,env,{getSession=async()=>null}={}){
   try{
@@ -94,17 +125,9 @@ export async function handleDevice(request,env,{getSession=async()=>null}={}){
         if(!await store.compareAndSwap(grant.version,{...grant,version:grant.version+1,nextPollAt:Date.now()+POLL_MS},grant.expiresAt-Date.now()))throw new HttpError(409,'Linking request changed. Please retry.');
         return response({error:'Approval is pending.',interval:POLL_MS/1000},428);
       }
-      if(grant.status!=='approved'||!grant.hostId)throw new HttpError(410,'Desktop link expired. Start again.');
-      const generation=recordGeneration(grant.accountGeneration);let issued;
-      return await withLifecycleAdmission(env,grant.hostId,'device_exchange',async life=>{const {assertActive,write}=life;await assertActive();
-      if(!await write(()=>store.compareAndSwap(grant.version,{...grant,version:grant.version+1,status:'consumed'},grant.expiresAt-Date.now())))throw new HttpError(409,'Desktop link was already exchanged.');
-      const scope=grantScope(grant);if(!validScopes.has(scope))throw new HttpError(400,'Unsupported desktop permissions.');
-      const accessToken=randomToken(),tokenHash=await sha256(accessToken),id=crypto.randomUUID(),expiresAt=Date.now()+TOKEN_MS;issued={tokenHash,id};
-      await assertActive();await updateRegistry(env,grant.hostId,sessions=>{if(sessions.length>=20)throw new HttpError(409,'Revoke an existing desktop session before linking another.');return [...sessions,{id,name:grant.name,tokenHash,scope,accountGeneration:generation,createdAt:Date.now(),expiresAt}];},life);
-      await indexAccountObject(env,grant.hostId,'desktop-token:'+tokenHash,expiresAt,life);
-      await assertActive();await write(()=>env.AUTH.getByName('desktop-token:'+tokenHash).put({id,hostId:grant.hostId,scope,expiresAt,accountGeneration:generation},TOKEN_MS));
-      return response({accessToken,tokenType:'Bearer',expiresAt,scope});
-      },{generation,cleanup:async error=>{if(issued){await env.AUTH.getByName('desktop-token:'+issued.tokenHash).take();await updateRegistry(env,grant.hostId,sessions=>sessions.filter(s=>s.id!==issued.id));}return error instanceof HttpError&&error.status<500;}});
+      if(grant.status!=='approved'||!grant.hostId||grant.kind==='mcp')throw new HttpError(410,'Desktop link expired. Start again.');
+      const issued=await exchangeApprovedGrant(env,store,grant);
+      return response({accessToken:issued.accessToken,tokenType:'Bearer',expiresAt:issued.expiresAt,scope:issued.scope});
     }
     if(path==='/api/device/me'&&request.method==='GET'){
       const device=await authenticateDevice(request,env);if(!device)throw new HttpError(401,'Desktop session expired or was revoked.');return response(device);
@@ -115,7 +138,7 @@ export async function handleDevice(request,env,{getSession=async()=>null}={}){
     }
     if(path==='/api/device/sessions'&&request.method==='GET'){
       const user=await getSession(request);if(!user?.hostId)throw new HttpError(401,'Sign in to manage desktop sessions.');
-      const state=await registry(env,user.hostId).get();return response({sessions:(state?.sessions||[]).filter(s=>s.expiresAt>Date.now()).map(({tokenHash,accountGeneration,...session})=>session)});
+      const state=await registry(env,user.hostId).get();return response({sessions:(state?.sessions||[]).filter(s=>s.expiresAt>Date.now()).map(({tokenHash,accountGeneration,clientHash,...session})=>session)});
     }
     if(path==='/api/device/revoke'&&request.method==='POST'){
       const user=await browserUser(request,env,getSession),data=await readJson(request,1000);

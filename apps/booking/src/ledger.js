@@ -104,6 +104,9 @@ export class BookingLedger {
     if(!this.lifecycleFrozen()&&!this.meta('quotaHistoryStartedAt'))this.putMeta('quotaHistoryStartedAt',Date.now());
     if(!this.lifecycleFrozen()&&!this.meta('notificationHistoryStartedAt'))this.putMeta('notificationHistoryStartedAt',Date.now());
     this.sql.exec('CREATE TABLE IF NOT EXISTS live_metrics (day TEXT NOT NULL, metric TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(day,metric))');
+    // What connected apps changed, newest first. Kept as long as bookings (90 days), at most 500 rows.
+    this.sql.exec('CREATE TABLE IF NOT EXISTS live_activity (id TEXT PRIMARY KEY, at INTEGER NOT NULL, body TEXT NOT NULL)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS live_activity_at ON live_activity (at)');
     this.integrations=new IntegrationOutbox(this,dependencies.integrations);
     installExportRevision(this);installLifecycleRevision(this);
     if(!this.lifecycleFrozen())this.upgradeHoursModel();
@@ -564,6 +567,20 @@ export class BookingLedger {
   approvalCapacity(email,excludeId){const holds=this.rows("SELECT body FROM live_bookings WHERE status='awaiting_approval'").map(row=>JSON.parse(row.body)).filter(b=>b.id!==excludeId);return holds.length<100&&holds.filter(b=>b.email===email).length<3;}
   // Only the authenticated owner RPC may call this method. Guest capability
   // tokens and existing read/settings device scopes confer no decision power.
+  recordActivity(entry){
+    const clip=(value,max)=>typeof value==='string'?value.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,max):'';
+    const actor=entry?.actor||{},target=entry?.target;
+    const body={id:crypto.randomUUID(),at:Date.now(),actor:{kind:clip(actor.kind,20)||'app',name:clip(actor.name,80)||'Connected app',...(actor.sessionId?{sessionId:clip(actor.sessionId,80)}:{}),...(actor.email?{email:clip(actor.email,254)}:{})},action:clip(entry?.action,60),summary:clip(entry?.summary,300),...(target?{target:{type:clip(target.type,20),id:clip(target.id,100)}}:{})};
+    if(!body.action||!body.summary)return {error:'Choose an activity to record.',status:400};
+    this.sql.exec('INSERT INTO live_activity VALUES (?,?,?)',body.id,body.at,JSON.stringify(body));
+    this.sql.exec('DELETE FROM live_activity WHERE at<?',Date.now()-90*86400000);
+    this.sql.exec('DELETE FROM live_activity WHERE id IN (SELECT id FROM live_activity ORDER BY at DESC LIMIT -1 OFFSET 500)');
+    return {activity:body};
+  }
+  activity({limit=50,before}={}){
+    const n=Number.isSafeInteger(limit)?Math.min(Math.max(limit,1),200):50,cut=Number.isSafeInteger(before)?before:Number.MAX_SAFE_INTEGER;
+    return {activity:this.rows('SELECT body FROM live_activity WHERE at<? ORDER BY at DESC LIMIT ?',cut,n).map(r=>JSON.parse(r.body))};
+  }
   async decideBooking(id,data){
     if(this.maintenanceFrozen())return maintenanceRefusal();
     const maintenanceEpoch=this.maintenanceEpoch();

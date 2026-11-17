@@ -59,6 +59,8 @@ export class LiveBookingHost extends DurableObject {
   cancel(id,token,reason,authority){return this.#active(async()=>{return this.ledger.cancel(id,token,reason,authority);});}
   reschedule(id,token,start,key,authority){return this.#active(async()=>{return this.ledger.reschedule(id,token,start,key,authority);});}
   analytics(){return this.#active(async()=>{return this.ledger.analytics();});}
+  recordActivity(entry){return this.#active(async()=>this.ledger.recordActivity(entry));}
+  activity(options){return this.#active(async()=>this.ledger.activity(options),{readOnly:true});}
   recordVisit(slug,source){return this.#active(async()=>{return this.ledger.recordVisit(slug,source);});}
   listBookings(options){return this.#active(async()=>{await this.ledger.resumeConfirmedSync();return this.ledger.listBookings(options);});}
   disconnect(accountId){return this.#active(async()=>{return this.ledger.disconnect(accountId);});}
