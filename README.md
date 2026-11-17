@@ -1,17 +1,48 @@
-# Scheduling
+<p align="center">
+  <img src="assets/readme/icon.png" width="112" height="112" alt="">
+</p>
 
-Open-source booking links for you and your team. Connect Google Calendar,
-share a link, and guests pick a time without making an account. They get a
-real Google Calendar invite.
+<h1 align="center">Scheduling by YCorp</h1>
 
-It runs on Cloudflare Workers and Durable Objects.
+<p align="center">Open-source booking links for you and your team, on top of Google Calendar.</p>
 
-## Status
+<p align="center">
+  <a href="https://meet.ycorplabs.com"><b>Use it</b></a> ·
+  <a href="https://ycorplabs.com/schedule/">Website</a> ·
+  <a href="docs/self-hosting.md">Self-hosting</a> ·
+  <a href="docs/">Docs</a> ·
+  <a href="SUPPORT.md">Support</a>
+</p>
 
-It's a beta. There's a hosted version at
-[meet.ycorplabs.com](https://meet.ycorplabs.com), or you can host your own.
-Found a bug or have an idea? Open an
-[issue](https://github.com/YCorpLabs/Scheduling/issues).
+<p align="center">
+  <img src="assets/readme/hero.png" width="800" alt="Studio's Availability week with calendar events and booked intro calls, and in front of it a guest booking page for a 30-minute intro call with open times on Wednesday 18 November">
+</p>
+
+Connect Google Calendar, share a link, and guests pick a time without making
+an account. They get a real Google Calendar invite, and you see the booking in
+Studio next to your links, hours and calendars.
+
+It runs on Cloudflare Workers and Durable Objects. Use the hosted version at
+[meet.ycorplabs.com](https://meet.ycorplabs.com) or run your own.
+
+> [!NOTE]
+> **It's a beta.** Found a bug or have an idea? Open an
+> [issue](https://github.com/YCorpLabs/Scheduling/issues).
+
+## A quick look
+
+**Guests pick a time and book.** No account, just a name and an email address.
+
+<img src="assets/readme/booking.png" width="800" alt="Booking page for an intro call with Alex Morgan: Wednesday 18 November, 10:15 to 10:45, with the guest's name, email address and a note filled in above Confirm booking">
+
+**They get a confirmation with the Meet link.** The invitation itself comes from
+Google Calendar, and a private link lets them reschedule or cancel.
+
+<img src="assets/readme/confirmed.png" width="800" alt="Confirmation page: You're booked, Intro call on Friday 20 November, 10:00 to 10:30, with Join Google Meet and Manage booking">
+
+**You see every booking in Studio.**
+
+<img src="assets/readme/studio-bookings.png" width="800" alt="Studio's Bookings page listing three upcoming intro calls on Wednesday, Thursday and Friday">
 
 ## Features
 
