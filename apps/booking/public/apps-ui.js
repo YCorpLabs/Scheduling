@@ -65,9 +65,32 @@ export function changeTime(ms,{fmt,now=Date.now()}){
   if(key(ms)===key(now-DAY))return 'Yesterday';
   return fmt(ms,{day:'numeric',month:'short'});
 }
+// A change as a sentence with Studio times ("Mon 17 Nov, 15:00"). New entries carry structured detail;
+// older ones only a summary with machine times ("2026-11-17 15:00", host wall clock) and link paths,
+// so those known shapes are rewritten and anything else is shown as recorded.
+const STAMP='(\\d{4})-(\\d{2})-(\\d{2}) (\\d{2}):(\\d{2})';
+// Old stamps are already host wall clock, so they are formatted as UTC in the Studio's own locale.
+export function changeSummary(entry,{fmt,wall=(ms,o)=>fmt(ms,{...o,timeZone:'UTC'})}){
+  const when=(ms,format)=>`${format(ms,{weekday:'short',day:'numeric',month:'short'})}, ${format(ms,{hour:'2-digit',minute:'2-digit',hour12:false})}`;
+  const d=entry?.detail,summary=String(entry?.summary||''),person=x=>`${x.title||'Booking'}${x.name?` with ${x.name}`:''}`;
+  if(d&&typeof d==='object'){
+    if(entry.action==='reschedule_booking'&&Number.isFinite(d.to))return `Moved ${person(d)}${Number.isFinite(d.from)?` from ${when(d.from,fmt)}`:''} to ${when(d.to,fmt)}`;
+    if((entry.action==='cancel_booking'||entry.action==='decide_booking')&&Number.isFinite(d.at)){const verb=entry.action==='cancel_booking'?'Cancelled':d.decision==='approve'?'Approved':d.decision==='decline'?'Declined':'';if(verb)return `${verb} ${person(d)} on ${when(d.at,fmt)}`;}
+    const linkVerb={create_link:'Created',update_link:'Changed',delete_link:'Deleted'}[entry.action];
+    if(linkVerb&&d.link)return `${linkVerb} the ${d.link} link`;
+  }
+  const stamp=(y,m,day,h,min)=>when(Date.UTC(+y,+m-1,+day,+h,+min),wall);
+  let match=new RegExp(`^Moved (.+) on ${STAMP} to ${STAMP}$`).exec(summary);
+  if(match)return `Moved ${match[1]} from ${stamp(...match.slice(2,7))} to ${stamp(...match.slice(7,12))}`;
+  match=new RegExp(`^(Approved|Declined|Cancelled) (.+) on ${STAMP}$`).exec(summary);
+  if(match)return `${match[1]} ${match[2]} on ${stamp(...match.slice(3,8))}`;
+  match=/^(Created|Updated|Deleted) link (.+) \(\/[^()]*\)$/.exec(summary);
+  if(match)return `${match[1]==='Updated'?'Changed':match[1]} the ${match[2]} link`;
+  return summary;
+}
 export function appDetailMarkup(view,{fmt,status,phone=false}){
   const connected=Number.isFinite(view.createdAt)?` Connected ${fmt(view.createdAt,{day:'numeric',month:'short'})}.`:'';
-  const changes=view.changes===null?'':`<section class="st-sec" aria-labelledby="app-changes-title"><h2 id="app-changes-title">Recent changes</h2>${view.changes.length?`<div class="st-changes">${view.changes.slice(0,50).map(entry=>{const booking=entry.target?.type==='booking'&&entry.target.id;return `<div class="st-change">${booking?`<button type="button" class="st-change-what" data-activity-booking="${esc(booking)}">${esc(entry.summary)}</button>`:`<span class="st-change-what">${esc(entry.summary)}</span>`}<span class="st-change-when">${esc(changeTime(entry.at,{fmt}))}</span></div>`;}).join('')}</div>`:'<p class="st-note">No changes yet.</p>'}</section>`;
+  const changes=view.changes===null?'':`<section class="st-sec" aria-labelledby="app-changes-title"><h2 id="app-changes-title">Recent changes</h2>${view.changes.length?`<div class="st-changes">${view.changes.slice(0,50).map(entry=>{const booking=entry.target?.type==='booking'&&entry.target.id;return `<div class="st-change">${booking?`<button type="button" class="st-change-what" data-activity-booking="${esc(booking)}">${esc(changeSummary(entry,{fmt}))}</button>`:`<span class="st-change-what">${esc(changeSummary(entry,{fmt}))}</span>`}<span class="st-change-when">${esc(changeTime(entry.at,{fmt}))}</span></div>`;}).join('')}</div>`:'<p class="st-note">No changes yet.</p>'}</section>`;
   return `<button type="button" class="st-crumb" data-apps-back>${back}Connected apps</button><div class="st-head"><h1>${esc(view.title)}</h1></div><p class="st-lead">${view.desktop&&view.device?`On ${esc(view.device)}. `:''}${esc(capability(view.scope))}${esc(connected)}</p>${status}${changes}<div class="st-danger"><button type="button" class="st-pill red" data-disconnect-app="${esc(view.id)}">Disconnect ${esc(view.title)}</button></div>`;
 }
 

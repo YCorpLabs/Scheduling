@@ -57,6 +57,9 @@
 .host-console .st-page h2{margin:0 0 8px;font-size:16px;line-height:24px;font-weight:650;letter-spacing:-.01em;color:var(--ui-ink)}
 .st-head{position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:32px}
 .st-lead{margin:-28px 0 32px;color:var(--ui-muted);font-size:14px;line-height:20px}
+/* "For Fernhill": 4px under the heading, with the page's lead line straight after it. */
+.st-for{margin:-28px 0 32px;color:var(--ui-muted);font-size:14px;line-height:20px}
+.st-for+.st-lead{margin-top:-32px}
 .st-page #host-status{margin:0}
 .st-page #host-status.has-message{margin:-8px 0 24px}
 .st-page>.setup-callout{margin:0 0 24px}

@@ -41,6 +41,8 @@ export function settingsSidebarMarkup({pages,current,account}){
 /** Phones: "‹ Settings" above each page. Hidden on wider screens, where the sidebar does this. */
 export const phoneBack=()=>`<button type="button" class="st-phone-back" data-settings-page="">${backIcon}Settings</button>`;
 export const pageHead=(title,action='')=>`<div class="st-head"><h1>${esc(title)}</h1>${action}</div>`;
+/** In a team, pages that change the team say so right under the heading. */
+export const forTeam=workspace=>workspace&&!workspace.personal?`<p class="st-for">For ${esc(workspace.name)}</p>`:'';
 export function settingsListMarkup(items){
   return `${pageHead('Settings')}<div class="st-list">${items.map(item=>`<button type="button" class="st-list-row" data-settings-page="${item.page}"><span class="st-text"><span class="st-name">${esc(pageTitle(item.page))}</span><span class="st-line">${esc(item.summary)}</span></span>${chevron}</button>`).join('')}</div>`;
 }

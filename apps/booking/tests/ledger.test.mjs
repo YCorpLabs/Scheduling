@@ -787,3 +787,10 @@ test('public availability carries only the saved profile pictures, without expos
  for(const slug of ['intro','other']){const state=await ledger.availability(slug);assert.equal(state.config.avatarImage,image('avatar'));assert.equal(state.config.bannerImage,image('banner'));assert.equal(state.config.id,undefined);assert.ok(!JSON.stringify(state).includes('refresh_token'));}
  ledger.saveSettings({profile:{avatarImage:null,bannerImage:null}});const state=await ledger.availability('intro');assert.equal(state.config.avatarImage,null);assert.equal(state.config.bannerImage,null);
 });
+test('activity keeps only known structured detail beside the summary',()=>{
+ const {ledger}=setup();const at=Date.UTC(2026,10,17,14);
+ const saved=ledger.recordActivity({actor:{kind:'mcp',name:'Claude',sessionId:'s1'},action:'reschedule_booking',summary:'Moved Intro call with Sam Lee from Tue 17 Nov, 15:00 to Wed 18 Nov, 09:45',target:{type:'booking',id:'b1'},detail:{title:'Intro call',name:'Sam\u0000 Lee',from:at,to:at+18*3600000,decision:'maybe',at:'soon',html:'<b>x</b>',link:'x'.repeat(400)}}).activity;
+ assert.deepEqual(saved.detail,{title:'Intro call',name:'Sam  Lee',link:'x'.repeat(160),from:at,to:at+18*3600000});
+ assert.equal(ledger.recordActivity({actor:{name:'Claude'},action:'update_hours',summary:'Updated availability: weekly hours'}).activity.detail,undefined);
+ assert.deepEqual(ledger.activity({limit:5}).activity.map(a=>a.action).sort(),['reschedule_booking','update_hours']);
+});

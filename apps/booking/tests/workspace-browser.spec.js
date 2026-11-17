@@ -94,6 +94,19 @@ test('after a reload in a team the account button still names the signed-in pers
   await page.reload();await expect(trigger.locator('strong')).toHaveText('Ada');await trigger.click();await expect(page.locator('#account-menu .account-who')).toContainText('Ada');await expect(page.locator('#account-menu .account-who')).toContainText('ada@example.com');
 });
 
+test('in a team, Profile and Notifications say "For <team>" 4px under the heading; personal pages show nothing extra',async({page})=>{
+  await mock(page);await page.setViewportSize({width:1440,height:900});await page.goto(base+'/studio#settings/profile');
+  await expect(page.locator('h1')).toHaveText('Profile');await expect(page.locator('.st-for')).toHaveCount(0);
+  await page.goto('about:blank');await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');await expect(page.locator('#edit-title')).toHaveValue('Acme demo');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.locator('h1')).toHaveText('Profile');
+  await expect(page.locator('.st-for')).toHaveText('For Acme');
+  const gap=await page.evaluate(()=>{const r=s=>document.querySelector(s).getBoundingClientRect();return {underHeading:r('.st-for').top-r('#main h1').bottom,leadAfter:r('.st-lead').top-r('.st-for').bottom,toContent:r('.pf-grid').top-r('.st-lead').bottom};});
+  expect(gap).toEqual({underHeading:4,leadAfter:0,toContent:32});await expect(page.locator('.st-for + .st-lead')).toHaveText('Guests see this on your booking pages.');
+  const pages=page.getByRole('navigation',{name:'Settings'});
+  await pages.getByRole('button',{name:'Notifications',exact:true}).click();await expect(page.locator('h1')).toHaveText('Notifications');await expect(page.locator('.st-for')).toHaveText('For Acme');await expect(page.locator('.st-for + .st-lead')).toHaveText('Post new and changed bookings where your team will see them.');
+  for(const name of ['Connected apps','Sign-in & data']){await pages.getByRole('button',{name,exact:true}).click();await expect(page.locator('h1')).toHaveText(name);await expect(page.locator('.st-for')).toHaveCount(0);}
+});
+
 test('stored selection from another account or a removed company never leaks',async({page})=>{
   await page.addInitScript(()=>{if(!sessionStorage.getItem('seeded')){sessionStorage.setItem('seeded','1');localStorage.setItem('scheduling-workspace',JSON.stringify({account:'h_someone_else',id:'h_acmeacmeacmeacmeacmeacme',name:'Acme'}));}});
   const state=await mock(page);await page.goto(base+'/studio#link=intro');await expect(page.locator('#edit-title')).toHaveValue('Personal intro');
@@ -369,7 +382,8 @@ test('connected apps list Email and AI apps; an app page shows its recent change
   await page.screenshot({path:`${shots}/activity.png`,fullPage:true});
   await rows.nth(0).click();await expect(page).toHaveURL(/#settings\/apps\/s1$/);
   await expect(page.locator('h1')).toHaveText('Claude');await expect(page.locator('.st-lead')).toHaveText(/^Can change your links, hours and bookings\. Connected /);
-  await expect(page.locator('.st-change-what')).toHaveText(['Approved Personal booking with Guest on 2026-11-18 10:00','Updated availability: weekly hours']);
+  // An entry stored before structured detail keeps its words; its machine time reads like the Studio.
+  await expect(page.locator('.st-change-what')).toHaveText([/^Approved Personal booking with Guest on Wed,? (Nov 18|18 Nov), 10:00$/,'Updated availability: weekly hours']);
   await page.getByRole('button',{name:/Approved Personal booking/}).click();await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'Disconnect Claude'}).click();const confirm=page.getByRole('dialog',{name:'Disconnect Claude?'});await expect(confirm).toContainText('It loses access right away.');await confirm.getByRole('button',{name:'Disconnect'}).click();
   await expect(page.locator('h1')).toHaveText('Connected apps');await expect(page.locator('#host-status')).toHaveText('Claude disconnected');await expect(rows).toHaveCount(2);

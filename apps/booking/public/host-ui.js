@@ -27,7 +27,7 @@ import { addDays, weeklySummary, zonedEpoch } from "/week-calendar.js";
 import { WORKSPACE_HEADER, resolveWorkspaces, readStoredWorkspace, storeWorkspace, clearStoredWorkspace, captureInviteToken, stashInviteToken, takePendingInvite, clearPendingInvite, roleLabel, switcherMarkup, bindSwitcher, showCreateWorkspace, sectionsFor, can, canAdminister, cleanWorkspace, teamMarkup, bindTeam, showInviteDialog, showInviteAcceptance, confirmAction } from "/workspace-ui.js";
 import { integrationsMarkup, bindIntegrations, integrationsHeading } from "/integrations-ui.js";
 import { appView, appsPageMarkup, appDetailMarkup, loadApps, bindApps } from "/apps-ui.js";
-import { SETTINGS_PAGES, pageTitle, parseSettingsHash, settingsHash, settingsSidebarMarkup, phoneBack, pageHead, settingsListMarkup, profilePageMarkup, profileCardMarkup, accountPageMarkup, bindSettingsExport } from "/settings-ui.js";
+import { SETTINGS_PAGES, pageTitle, parseSettingsHash, settingsHash, settingsSidebarMarkup, phoneBack, pageHead, forTeam, settingsListMarkup, profilePageMarkup, profileCardMarkup, accountPageMarkup, bindSettingsExport } from "/settings-ui.js";
 import { normalizeBrand, brandMark, studioName, legalLinksMarkup } from "/brand.js";
 const phone = () => {
   try {
@@ -854,14 +854,14 @@ export async function hostUI(bootstrap) {
     if (page === "") return settingsListMarkup(settingsPages().map((id) => ({ page: id, summary: settingsSummary(id) })));
     if (page === "Profile") {
       if (!settings) return back + pageHead("Profile") + notices + (loadError ? `<p class="st-note error" role="alert">${esc(loadError)}</p>` : '<p class="st-note" role="status">Loading…</p>');
-      return back + profilePageMarkup({ values: profileValues(), meeting: settings.meetingTypes?.[0], head: pageHead("Profile"), status: notices, error: profileError, saving: profileSaving });
+      return back + profilePageMarkup({ values: profileValues(), meeting: settings.meetingTypes?.[0], head: pageHead("Profile") + forTeam(ws.active), status: notices, error: profileError, saving: profileSaving });
     }
     if (page === "Apps") {
       const app = settingsApp && appsData?.apps?.find((a) => a.id === settingsApp);
       if (app) return appDetailMarkup(appView(app, { activity: appsData.activity }), { fmt, status: notices });
       return back + appsPageMarkup(appsData, { loading: appsLoading, error: appsError, origin: location.origin, head: (action) => pageHead("Connected apps", action), status: notices });
     }
-    if (page === "Notifications") return back + pageHead("Notifications", intData ? integrationsHeading(intData) : "") + '<p class="st-lead">Post new and changed bookings where your team will see them.</p>' + notices + integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time });
+    if (page === "Notifications") return back + pageHead("Notifications", intData ? integrationsHeading(intData) : "") + forTeam(ws.active) + '<p class="st-lead">Post new and changed bookings where your team will see them.</p>' + notices + integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time });
     return back + accountPageMarkup({ email: bootstrap.email || "", head: pageHead("Sign-in & data"), status: notices, sessions: browserList, sessionsError: browserError, contributions, workspaceName, review: contributionReview, legal: legalLinksMarkup(brand) });
   }
   // Calendars an admin connected for the whole team (from before members had their own).

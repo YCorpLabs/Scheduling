@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {accountName,initials,accountMenuMarkup} from '../public/account-menu.js';
-import {appView,clientMark,accessLine,capability,mcpAddress,addAppSteps,appsPageMarkup,appDetailMarkup,changeTime} from '../public/apps-ui.js';
-import {parseSettingsHash,settingsHash,pageTitle,lastUsed,browserRow,accountPageMarkup,profilePageMarkup,profileCardMarkup,settingsSidebarMarkup,settingsListMarkup} from '../public/settings-ui.js';
+import {appView,clientMark,accessLine,capability,mcpAddress,addAppSteps,appsPageMarkup,appDetailMarkup,changeTime,changeSummary} from '../public/apps-ui.js';
+import {parseSettingsHash,settingsHash,pageTitle,lastUsed,browserRow,accountPageMarkup,profilePageMarkup,profileCardMarkup,settingsSidebarMarkup,settingsListMarkup,forTeam,pageHead} from '../public/settings-ui.js';
 import {browserLabel} from '../public/browser-label.js';
 import {bookingsMarkup} from '../public/bookings-ui.js';
 
@@ -115,4 +115,31 @@ test('Bookings links Stats for people without Links',()=>{
   const fmtLocal=(ms,o)=>new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',...o}).format(ms);
   assert.match(bookingsMarkup({bookings:[],fmt:fmtLocal,zoneName:'UTC',stats:true}),/Cancelled<\/button> · <button type="button" class="link-button" data-section="Analytics">Stats<\/button>/);
   assert.doesNotMatch(bookingsMarkup({bookings:[],fmt:fmtLocal,zoneName:'UTC'}),/data-section="Analytics"/);
+});
+
+test('changes read with Studio times in the host zone, from detail or from the known older summaries',()=>{
+  const oslo=(ms,o)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Oslo',...o}).format(ms),wall=(ms,o)=>new Intl.DateTimeFormat('en-GB',{...o,timeZone:'UTC'}).format(ms);
+  const from=Date.UTC(2026,10,17,14),to=Date.UTC(2026,10,18,8,45);
+  assert.equal(changeSummary({action:'reschedule_booking',summary:'(ignored)',detail:{title:'Intro call',name:'Sam Lee',from,to}},{fmt:oslo,wall}),'Moved Intro call with Sam Lee from Tue 17 Nov, 15:00 to Wed 18 Nov, 09:45');
+  assert.equal(changeSummary({action:'cancel_booking',summary:'x',detail:{title:'Intro call',name:'Sam Lee',at:from}},{fmt:oslo,wall}),'Cancelled Intro call with Sam Lee on Tue 17 Nov, 15:00');
+  assert.equal(changeSummary({action:'decide_booking',summary:'x',detail:{title:'Product demo',name:'Priya Shah',at:to,decision:'decline'}},{fmt:oslo,wall}),'Declined Product demo with Priya Shah on Wed 18 Nov, 09:45');
+  assert.equal(changeSummary({action:'update_link',summary:'x',detail:{link:'Product demo'}},{fmt:oslo,wall}),'Changed the Product demo link');
+  // Entries stored before detail existed: host wall-clock stamps and link paths are rewritten.
+  assert.equal(changeSummary({action:'reschedule_booking',summary:'Moved Intro call with Sam Lee on 2026-11-17 15:00 to 2026-11-18 09:45'},{fmt:oslo,wall}),'Moved Intro call with Sam Lee from Tue 17 Nov, 15:00 to Wed 18 Nov, 09:45');
+  assert.equal(changeSummary({summary:'Approved Intro with Grace on 2026-11-20 10:30'},{fmt:oslo,wall}),'Approved Intro with Grace on Fri 20 Nov, 10:30');
+  assert.equal(changeSummary({summary:'Cancelled Coffee on the dock with Bo on 2026-12-01 08:00'},{fmt:oslo,wall}),'Cancelled Coffee on the dock with Bo on Tue 1 Dec, 08:00');
+  assert.equal(changeSummary({summary:'Updated link Product demo (/demo)'},{fmt:oslo,wall}),'Changed the Product demo link');
+  assert.equal(changeSummary({summary:'Created link Intro (/intro)'},{fmt:oslo,wall}),'Created the Intro link');
+  assert.equal(changeSummary({summary:'Deleted link Coffee (/coffee-chat)'},{fmt:oslo,wall}),'Deleted the Coffee link');
+  for(const summary of ['Updated availability: weekly hours','Changed settings: profile.name','Moved things on 2026-11-17','Connected Slack: #bookings'])assert.equal(changeSummary({summary},{fmt:oslo,wall}),summary);
+  const view=appView({id:'c1',kind:'mcp',name:'Claude',scope:'booking:read'},{activity:[{at:from,actor:{sessionId:'c1'},action:'reschedule_booking',summary:'Moved Intro call with Sam Lee on 2026-11-17 15:00 to 2026-11-18 09:45',target:{type:'booking',id:'b1'}}],now:to});
+  const html=appDetailMarkup(view,{fmt:oslo,status:''});assert.match(html,/data-activity-booking="b1">Moved Intro call with Sam Lee from \w{3} 17 Nov, 15:00 to \w{3} 18 Nov, 09:45</);assert.doesNotMatch(html,/2026-11-17/);
+});
+
+test('in a team, Profile and Notifications say which team they change; a personal profile shows nothing extra',()=>{
+  assert.equal(forTeam({id:'h_f',name:'Fernhill',personal:false}),'<p class="st-for">For Fernhill</p>');
+  assert.equal(forTeam({id:'h_me',name:'Alex Morgan',personal:true}),'');assert.equal(forTeam(null),'');
+  assert.equal(forTeam({name:'<b>Acme</b>',personal:false}),'<p class="st-for">For &lt;b&gt;Acme&lt;/b&gt;</p>');
+  const html=profilePageMarkup({values:{name:'Fernhill',company:''},meeting:null,head:pageHead('Profile')+forTeam({name:'Fernhill',personal:false}),status:''});
+  assert.match(html,/<h1>Profile<\/h1><\/div><p class="st-for">For Fernhill<\/p><p class="st-lead">Guests see this on your booking pages\.<\/p>/);
 });

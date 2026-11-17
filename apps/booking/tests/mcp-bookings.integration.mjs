@@ -81,6 +81,10 @@ test('an agent approves, declines, reschedules and cancels bookings and connects
     const activity=(await tool('get_activity')).activity.map(a=>a.action);
     for(const action of ['create_link','decide_booking','reschedule_booking','cancel_booking','connect_integration','test_integration'])assert.ok(activity.includes(action),action);
     const summaries=(await (await call('/api/live/activity',{cookie})).json()).activity.map(a=>a.summary);
-    assert.ok(summaries.some(s=>/^Approved Intro with Grace on \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s)),summaries.join('\n'));assert.ok(summaries.some(s=>s.startsWith('Declined Intro with Linus')));assert.ok(summaries.some(s=>s.startsWith('Cancelled Intro with Grace')));
+    // Summaries read like the Studio ("Tue 17 Nov, 15:00" in the host's zone); the epoch times sit beside them as detail.
+    const day='(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \\d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec), \\d{2}:\\d{2}';
+    assert.ok(summaries.some(s=>new RegExp(`^Approved Intro with Grace on ${day}$`).test(s)),summaries.join('\n'));assert.ok(summaries.some(s=>new RegExp(`^Moved Intro with Grace from ${day} to ${day}$`).test(s)),summaries.join('\n'));assert.ok(!summaries.some(s=>/\d{4}-\d{2}-\d{2}/.test(s)),summaries.join('\n'));
+    const entries=(await (await call('/api/live/activity',{cookie})).json()).activity,move=entries.find(a=>a.action==='reschedule_booking'),approval=entries.find(a=>a.action==='decide_booking'&&a.detail?.decision==='approve');
+    assert.deepEqual(Object.keys(move.detail).sort(),['from','name','title','to']);assert.ok(Number.isSafeInteger(move.detail.from)&&Number.isSafeInteger(move.detail.to));assert.deepEqual({title:approval.detail.title,name:approval.detail.name},{title:'Intro',name:'Grace'});assert.ok(summaries.some(s=>s.startsWith('Declined Intro with Linus')));assert.ok(summaries.some(s=>s.startsWith('Cancelled Intro with Grace')));
   }finally{await mf.dispose();}
 });
