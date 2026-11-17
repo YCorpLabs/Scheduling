@@ -7,6 +7,7 @@ import { authorizationUrl, exchangeCode, getUserInfo } from './google.js';
 import {HttpError,response} from './http.js';
 import {brandFromEnv,escapeHTML,legalLinksMarkup} from '../public/brand.js';
 import {validateBrandImage,BRAND_IMAGES} from '../public/branding.js';
+import {browserLabel} from '../public/browser-label.js';
 import {workspaceAccess,ownCalendarMember,reserveWorkspaceOwnershipSync,releaseWorkspaceOwnershipSync} from './workspaces.js';
 
 const checkedHostResult=value=>{if(value?.error)throw Object.assign(new HttpError(value.status||503,value.error),{code:value.code});return value;};
@@ -92,12 +93,12 @@ function admitBrowser(state,record,{legacy=false,time=Date.now()}={}){
 /** The bearer is sent only through the existing HttpOnly cookie. Both the
  * credential lookup and authoritative host registry retain hashes, not tokens.
  */
-export async function storeBrowserSession(env,token,user){
+export async function storeBrowserSession(env,token,user,device=null){
   const time=Date.now(),tokenHash=await sha256(token),id=await browserId(tokenHash),expiresAt=time+SESSION_MS,generation=recordGeneration(user.accountGeneration);
   const store=env.AUTH.getByName('session:'+tokenHash);
   return withLifecycleAdmission(env,user.hostId,'browser_session',async life=>{const {assertActive,write}=life;
     await assertActive();
-    const admitted=await updateBrowserRegistry(env,user.hostId,(state,now)=>admitBrowser(state,{id,tokenHash,accountGeneration:generation,createdAt:time,lastSeenAt:time,expiresAt},{time:now}),life);
+    const admitted=await updateBrowserRegistry(env,user.hostId,(state,now)=>admitBrowser(state,{id,tokenHash,accountGeneration:generation,createdAt:time,lastSeenAt:time,expiresAt,...(device?.name?{device:device.name,mobile:device.mobile===true}:{})},{time:now}),life);
     if(!admitted)throw new HttpError(409,'This browser session was already revoked.');
     await indexAccountObject(env,user.hostId,'session:'+tokenHash,expiresAt,life);
     await assertActive();await write(()=>store.put({hostId:user.hostId,email:user.email,accountGeneration:generation,sessionVersion:1,id,createdAt:time,expiresAt},SESSION_MS));
@@ -158,7 +159,7 @@ function sessionError(error){return response({error:error instanceof HttpError?e
 export async function browserSessions(request,env){
   try{
     const current=await browserUser(request,env),state=await browserRegistry(env,current.user.hostId).get();
-    const sessions=(state?.sessions??[]).filter(s=>!s.revokedAt&&s.expiresAt>Date.now()).map(s=>({id:s.id,label:s.id===current.id?'This browser':'Browser session',createdAt:s.createdAt,lastSeenAt:s.lastSeenAt,expiresAt:s.expiresAt,current:s.id===current.id})).sort((a,b)=>Number(b.current)-Number(a.current)||b.lastSeenAt-a.lastSeenAt);
+    const sessions=(state?.sessions??[]).filter(s=>!s.revokedAt&&s.expiresAt>Date.now()).map(s=>({id:s.id,label:s.id===current.id?'This browser':'Browser session',...(s.device?{device:s.device,mobile:s.mobile===true}:{}),createdAt:s.createdAt,lastSeenAt:s.lastSeenAt,expiresAt:s.expiresAt,current:s.id===current.id})).sort((a,b)=>Number(b.current)-Number(a.current)||b.lastSeenAt-a.lastSeenAt);
     return response({sessions});
   }catch(error){return sessionError(error);}
 }
@@ -275,7 +276,7 @@ export async function oauthCallback(request,env) {
   if(saved.hostId){
     if(!await mayFinishConnection(request,env,saved))return new Response('Sign in again to connect this calendar.',{status:401});
   }else{
-    const sessionToken=randomToken();await storeBrowserSession(env,sessionToken,{hostId,email:user.email});
+    const sessionToken=randomToken();await storeBrowserSession(env,sessionToken,{hostId,email:user.email},browserLabel(request.headers.get('User-Agent')));
     headers.append('Set-Cookie',cookie('email_booking_session',sessionToken,originFor(env),7*86400));
   }
   headers.append('Set-Cookie',cookie('email_booking_oauth','',originFor(env),0,'/auth'));

@@ -55,8 +55,12 @@ test('delivery states and catalog match the backend contract',()=>{
   assert.equal(deliveryStateLabel('in_flight'),'Sending');assert.equal(canRetry({state:'failed'}),true);assert.equal(canRetry({state:'quarantined'}),false);
   assert.match(errorLabel('provider_rejected'),/Rejected/);
   const html=integrationsMarkup({integrations:[{id:'i1',kind:'slack',name:'Ops',enabled:true,events:['booking.confirmed'],includeGuestDetails:true,destinationLabel:'hooks.slack.com',revision:2},{id:'i2',kind:'webhook',name:'CRM',enabled:false,events:['booking.confirmed'],includeGuestDetails:false,destinationLabel:'crm.example',revision:1}],deliveries:[{id:'d1',integrationId:'i1',eventType:'booking.confirmed',state:'failed',attempts:3,lastAttemptAt:1,errorCode:'provider_rejected'}]},{formatTime:()=>'t'});
-  assert.match(html,/Slack · Confirmed · Shares guest details/);assert.match(html,/crm\.example/);assert.match(html,/data-retry-delivery="d1"/);assert.match(html,/<span class="pill off">Off<\/span>/);assert.match(html,/<span class="pill bad">Failing<\/span>/);assert.match(html,/integration-problem">Rejected by the destination/);assert.match(html,/data-toggle-integration="i2"/);
-  assert.doesNotMatch(html,/data-test-integration="i2"/);assert.doesNotMatch(html,/https:\/\//);assert.doesNotMatch(html,/answers/i);
+  // One muted line per row: the problem when there is one, otherwise what the integration sends.
+  assert.match(html,/st-line-problem" id="integration-meta-i1">Failing · Rejected by the destination/);assert.match(html,/Off · Webhook · crm\.example · Confirmed/);assert.match(html,/data-retry-delivery="d1"/);
+  assert.match(html,/data-integration-menu="i1"/);assert.match(html,/data-integration-menu="i2"/);assert.match(html,/data-edit-integration="i2"/);
+  assert.doesNotMatch(html,/data-test-integration|data-toggle-integration|class="pill/);
+  const quiet=integrationsMarkup({integrations:[{id:'i3',kind:'slack',name:'Ops',enabled:true,events:['booking.confirmed'],includeGuestDetails:true,revision:1}],deliveries:[]},{formatTime:()=>'t'});
+  assert.match(quiet,/Slack · Confirmed · Shares guest details/);assert.doesNotMatch(html,/https:\/\//);assert.doesNotMatch(html,/answers/i);
 });
 test('the editor groups events and rows summarise them in words',()=>{
   const catalog=eventCatalog({capabilities:{events:['booking.requested','booking.confirmed','booking.rescheduled','booking.cancelled','booking.approval_requested','booking.rejected','booking.expired','booking.future']}});

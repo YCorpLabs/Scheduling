@@ -36,7 +36,7 @@ test('booking sections, search and keyboard details work at desktop and mobile s
  await page.getByRole('searchbox',{name:'Search bookings'}).fill('not there');await expect(page.getByText('No matches.',{exact:true})).toBeVisible();await expect(page.getByRole('searchbox')).toBeFocused();
  await page.getByRole('searchbox').fill('Riley');await expect(page.getByRole('button',{name:/Details: Introductory/})).toBeVisible();
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/scheduling-workspace-mobile.png`,fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
- await page.setViewportSize({width:1440,height:1000});await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.locator('html')).toHaveAttribute('data-theme','dark');await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/scheduling-workspace-dark.png`,fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark',exact:true}).click();await expect(page.locator('html')).toHaveAttribute('data-theme','dark');await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/scheduling-workspace-dark.png`,fullPage:true});
 });
 
 test('host cancellation requires confirmation and updates the booking without leaving the workspace',async({page})=>{

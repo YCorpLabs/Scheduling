@@ -24,19 +24,10 @@
 .integration-mark.chip{width:24px;height:24px;border:0;border-radius:50%;background:var(--soft)}
 .integration-mark.chip svg{width:13px;height:13px}
 
-/* The list uses the Links row (.lk-row, .lk-main, .pill, .row-menu); these rules only add the logo,
-   the failure line and the extra pill colours. */
-.integration-card{overflow:hidden}
-.integration-mark.row{width:34px;height:34px;border:0;border-radius:9px;background:var(--soft)}
-.integration-mark.row svg{width:18px;height:18px}
+/* Rows use the Settings row (.st-row, .st-tile, .st-pill, see settings-ui.css); these rules only
+   dim a row that is off and colour a delivery problem. */
 .integration-row.off .integration-mark{opacity:.55;filter:grayscale(1)}
-.integration-row .lk-title{display:flex;align-items:center;gap:8px;min-width:0}
-.integration-row .pill{flex:none;vertical-align:0}
-.pill.bad{background:#fbeceb;color:#b23d35}
-.pill.warn{background:var(--warn-bg,#fdf5e4);color:var(--warn,#8a5a00)}
-.integration-problem{display:block;margin-top:2px;font-size:13px;color:#b23d35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.integration-choice .lk-main{cursor:default}
-.integration-unavailable{min-width:96px;font-size:13px;color:var(--muted);text-align:right;white-space:nowrap}
+.integration-row .st-line-problem{color:var(--ui-red)}
 
 /* Notices */
 .integration-notice{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:12px;background:#fcf0ef;color:#8f2f28}
@@ -160,8 +151,7 @@
 .integration-secret .integration-done p{max-width:340px}
 
 [data-theme=dark] .integration-mark.xl{box-shadow:none}
-[data-theme=dark] .pill.bad{background:#3a2422;color:#eeaaa3}
-[data-theme=dark] .integration-problem,[data-theme=dark] .integration-log-alert{color:#eeaaa3}
+[data-theme=dark] .integration-log-alert{color:#eeaaa3}
 [data-theme=dark] .integration-notice{background:#2f1d1c;color:#f1b4ad}
 [data-theme=dark] .delivery-what .delivery-error,[data-theme=dark] .field-error{color:#eeaaa3}
 [data-theme=dark] .integration-test[data-state=ok] .integration-test-text span{color:#9bd3a6}
@@ -173,7 +163,6 @@
 [data-theme=dark] .integration-dialog .workspace-form input:not([type=checkbox]):not([type=radio]):focus-visible,[data-theme=dark] .integration-dialog .copy-field input:focus-visible{box-shadow:0 0 0 3px #ffffff1f}
 
 @media(max-width:720px){
-.integration-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:8px 12px}.integration-row .integration-mark.row{width:30px;height:30px}.integration-row .lk-main{grid-column:2;grid-row:1}.integration-row .row-menu{grid-column:3;grid-row:1}.integration-row .lk-copy{grid-column:2;grid-row:2;justify-self:start;margin:0}.integration-row span.lk-copy{display:none}.integration-unavailable{grid-column:2;grid-row:2;text-align:left;min-width:0;white-space:normal}.integration-problem{white-space:normal}
 .delivery-entry{grid-template-columns:auto minmax(0,1fr) auto;row-gap:6px;padding:12px 14px}
 .delivery-when{grid-column:2/-1;grid-row:1}.delivery-entry>.integration-mark{grid-column:1;grid-row:2}.delivery-what{grid-column:2;grid-row:2}.delivery-entry .booking-badge{grid-column:3;grid-row:2}.delivery-actions{grid-column:2/-1;grid-row:3}
 .delivery-title{flex-wrap:wrap;row-gap:0}

@@ -57,6 +57,8 @@ async function mock(page,{role='admin',companies=true,authenticated=true,email='
 }
 const switcher=page=>page.locator('#workspace-trigger');
 const nav=page=>page.getByRole('navigation',{name:'Scheduling'});
+// Settings → Notifications (the Integrations page before).
+async function notifications(page){const pages=page.getByRole('navigation',{name:'Settings'});if(!await pages.isVisible())await page.getByRole('button',{name:'Settings',exact:true}).click();await pages.getByRole('button',{name:'Notifications',exact:true}).click();await expect(page.getByRole('heading',{name:'Notifications',level:1})).toBeVisible();}
 async function switchTo(page,name){await switcher(page).click();await page.getByRole('menuitemradio',{name:new RegExp(name)}).click();}
 
 test('workspace switcher scopes company requests, keeps identity personal and survives reload and theme',async({page})=>{
@@ -72,11 +74,37 @@ test('workspace switcher scopes company requests, keeps identity personal and su
   expect(state.requests.filter(r=>r.path==='/api/live/settings').at(-1).ws).toBe('h_acmeacmeacmeacmeacmeacme');
   expect(state.requests.filter(r=>r.path==='/api/live/workspaces').every(r=>r.ws===null)).toBeTruthy();
   await expect(page.locator('.host-identity small')).toHaveText('ada@example.com');await expect(page.locator('.host-identity strong')).toHaveText('Ada');
-  await expect(page.getByRole('button',{name:'Team'})).toBeVisible();await expect(page.getByRole('button',{name:'Integrations'})).toBeVisible();
+  await expect(nav(page).getByRole('button')).toHaveText(['Bookings','Links','Availability','Team']);await expect(page.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
   await nav(page).getByRole('button',{name:'Availability',exact:true}).click();await expect(page.locator('a[href^="/auth/google?connect=1&workspace=h_acme"]').first()).toBeVisible();
   await page.setViewportSize({width:1440,height:960});await nav(page).getByRole('button',{name:'Links',exact:true}).click();await switcher(page).click();await page.screenshot({path:`${shots}/workspace-switcher.png`});await page.keyboard.press('Escape');
   await page.reload();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();
-  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();await expect(switcher(page)).toContainText('Acme');
+  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark',exact:true}).click();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();await expect(switcher(page)).toContainText('Acme');
+});
+
+test('after a reload in a team the account button still names the signed-in person, never "Your account"',async({page})=>{
+  await page.addInitScript(()=>localStorage.setItem('scheduling-workspace',JSON.stringify({account:'h_me',id:'h_acmeacmeacmeacmeacmeacme',name:'Acme'})));
+  const state=await mock(page);let releasePersonal;
+  // Hold the personal profile so the first paint in the team is checked too.
+  let held=false;await page.route('**/api/live/settings',async route=>{if(!held&&!route.request().headers()['x-scheduling-workspace']){held=true;await new Promise(resolve=>releasePersonal=resolve);}return route.fallback();});
+  await page.goto(base+'/studio');await expect(switcher(page)).toContainText('Acme');
+  const trigger=page.locator('#account-trigger');await expect(trigger).not.toContainText('Your account');await expect(trigger.locator('strong')).toHaveText('ada@example.com');await expect(trigger.locator('.host-avatar')).toHaveText('A');
+  await expect.poll(()=>!!releasePersonal).toBe(true);releasePersonal();
+  await expect(trigger.locator('strong')).toHaveText('Ada');await expect(trigger.locator('.host-avatar')).toHaveText('A');
+  expect(state.requests.filter(r=>r.path==='/api/live/settings').map(r=>r.ws)).toContain(null);
+  await page.reload();await expect(trigger.locator('strong')).toHaveText('Ada');await trigger.click();await expect(page.locator('#account-menu .account-who')).toContainText('Ada');await expect(page.locator('#account-menu .account-who')).toContainText('ada@example.com');
+});
+
+test('in a team, Profile and Notifications say "For <team>" 4px under the heading; personal pages show nothing extra',async({page})=>{
+  await mock(page);await page.setViewportSize({width:1440,height:900});await page.goto(base+'/studio#settings/profile');
+  await expect(page.locator('h1')).toHaveText('Profile');await expect(page.locator('.st-for')).toHaveCount(0);
+  await page.goto('about:blank');await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');await expect(page.locator('#edit-title')).toHaveValue('Acme demo');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.locator('h1')).toHaveText('Profile');
+  await expect(page.locator('.st-for')).toHaveText('For Acme');
+  const gap=await page.evaluate(()=>{const r=s=>document.querySelector(s).getBoundingClientRect();return {underHeading:r('.st-for').top-r('#main h1').bottom,leadAfter:r('.st-lead').top-r('.st-for').bottom,toContent:r('.pf-grid').top-r('.st-lead').bottom};});
+  expect(gap).toEqual({underHeading:4,leadAfter:0,toContent:32});await expect(page.locator('.st-for + .st-lead')).toHaveText('Guests see this on your booking pages.');
+  const pages=page.getByRole('navigation',{name:'Settings'});
+  await pages.getByRole('button',{name:'Notifications',exact:true}).click();await expect(page.locator('h1')).toHaveText('Notifications');await expect(page.locator('.st-for')).toHaveText('For Acme');await expect(page.locator('.st-for + .st-lead')).toHaveText('Post new and changed bookings where your team will see them.');
+  for(const name of ['Connected apps','Sign-in & data']){await pages.getByRole('button',{name,exact:true}).click();await expect(page.locator('h1')).toHaveText(name);await expect(page.locator('.st-for')).toHaveCount(0);}
 });
 
 test('stored selection from another account or a removed company never leaks',async({page})=>{
@@ -91,7 +119,7 @@ test('stored selection from another account or a removed company never leaks',as
 test('old APIs without workspaces keep Personal only',async({page})=>{
   await mock(page,{companies:false});
   await page.route('**/api/live/workspaces',route=>route.fulfill({status:404,json:{error:'Not found'}}));
-  await page.goto(base+'/studio#link=intro');await expect(page.locator('#edit-title')).toHaveValue('Personal intro');await expect(switcher(page)).toHaveCount(0);await expect(page.getByRole('button',{name:'Integrations'})).toBeVisible();
+  await page.goto(base+'/studio#link=intro');await expect(page.locator('#edit-title')).toHaveValue('Personal intro');await expect(switcher(page)).toHaveCount(0);await expect(page.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
 });
 
 test('unsaved meeting edits are guarded when switching',async({page})=>{
@@ -141,7 +169,7 @@ test('team: invite link, revoke, role, transfer and removal call the backend wit
   await expect(dialog.getByText('Remove ad@acme.test from Acme?')).toBeVisible();await expect(dialog.getByRole('button',{name:'Back'})).toBeFocused();await dialog.getByRole('button',{name:'Remove member'}).click();await expect(page.getByText('ad@acme.test')).toHaveCount(0);
   await page.getByRole('button',{name:'Manage bo@acme.test'}).click();dialog=page.getByRole('dialog',{name:'Manage bo@acme.test'});await dialog.getByRole('button',{name:'Transfer ownership…'}).click();
   await expect(dialog.getByText('Make bo@acme.test the owner?')).toBeVisible();await page.screenshot({path:`${shots}/workspace-transfer.png`});await dialog.getByRole('button',{name:'Transfer ownership'}).click();
-  await expect(page.locator('.team-row').filter({hasText:'bo@acme.test'})).toContainText('Owner');await expect(switcher(page)).toContainText('Admin');
+  await expect(page.locator('.team-row').filter({hasText:'bo@acme.test'})).toContainText('Owner');await expect(switcher(page)).toHaveAttribute('aria-label',/, Admin$/);
   expect(state.requests.filter(r=>r.path==='/api/live/workspace/members').map(r=>r.body.action)).toEqual(['role','remove','transfer']);
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/workspace-team-mobile.png`,fullPage:true});
 });
@@ -151,16 +179,18 @@ test('members and viewers get read-only company access with no admin settings',a
   await expect(page.getByRole('heading',{name:'Bookings'})).toBeVisible();
   await expect(nav(page).getByRole('button')).toHaveText(['Bookings','Team']);
   for(const name of ['Links','Availability','Integrations'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
-  await page.locator('#account-trigger').click();const menu=page.getByRole('dialog',{name:'Account settings'});await expect(menu.getByRole('button',{name:'Dark mode'})).toBeVisible();
+  await page.locator('#account-trigger').click();const menu=page.getByRole('dialog',{name:'Account settings'});await expect(menu.getByRole('button',{name:'Dark',exact:true})).toBeVisible();
   for(const name of [/Troubleshooting/,'Edit profile','Change profile picture','Company profile'])await expect(menu.getByRole('button',{name})).toHaveCount(0);
   await page.keyboard.press('Escape');
+  // Settings keeps the account-level pages; the team's Profile and Notifications need admin rights.
+  await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('navigation',{name:'Settings'}).getByRole('button')).toHaveText(['Connected apps','Sign-in & data']);await page.getByRole('button',{name:'Back',exact:true}).click();
   await page.getByRole('button',{name:'Team'}).click();await expect(page.locator('.team-row')).toHaveCount(3);await expect(page.locator('[data-manage-member]')).toHaveCount(0);await expect(page.getByText('Pending invitations')).toHaveCount(0);await expect(page.getByRole('button',{name:'Invite',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Leave Acme'}).click();const leave=page.getByRole('dialog',{name:'Leave Acme?'});await expect(leave.getByRole('button',{name:'Cancel'})).toBeFocused();await leave.getByRole('button',{name:'Leave Acme',exact:true}).click();
   await expect(switcher(page)).toContainText('Ada');await expect(page.locator('#host-status')).toHaveText('You left Acme');await switcher(page).click();await expect(page.getByRole('menuitemradio',{name:/Acme/})).toHaveCount(0);
 });
 
 test('integrations: write-only URL, webhook host gate, one-time secret, test, retry and discard',async({page})=>{
-  const state=await mock(page);await page.goto(base+'/studio#link=intro');await page.getByRole('button',{name:'Integrations'}).click();
+  const state=await mock(page);await page.goto(base+'/studio#link=intro');await notifications(page);
   await expect(page.locator('.integration-choice')).toHaveCount(3);await expect(page.getByRole('button',{name:'Add integration',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Connect Webhook',exact:true})).toHaveCount(0);await expect(page.locator('.integration-choice.is-unavailable')).toContainText('Not available on this service');
   await page.getByRole('button',{name:'Connect Slack',exact:true}).click();
@@ -182,25 +212,25 @@ test('integrations: write-only URL, webhook host gate, one-time secret, test, re
   await page.getByRole('button',{name:'More for Ops'}).click();await expect(page.getByRole('menuitem')).toHaveText(['Send test','Edit','Turn off','Remove…']);await page.getByRole('menuitem',{name:'Send test'}).click();
   await expect(page.locator('#host-status')).toHaveText('Test notification queued');await expect(page.locator('.delivery-entry')).toContainText('Test notification');await expect(page.getByRole('button',{name:'More for Ops'})).toBeFocused();
   await page.getByRole('button',{name:'More for Ops'}).click();await page.getByRole('menuitem',{name:'Turn off'}).click();
-  await expect(page.getByRole('button',{name:'Turn on Ops'})).toBeFocused();expect(state.requests.filter(r=>r.body?.action==='update').at(-1).body).toMatchObject({id:'i1',enabled:false,expectedRevision:1});
-  await expect(page.locator('.integration-row.off .pill')).toHaveText('Off');await expect(page.locator('#host-status')).toHaveText('Ops is off');
+  await expect(page.getByRole('button',{name:'More for Ops'})).toBeFocused();expect(state.requests.filter(r=>r.body?.action==='update').at(-1).body).toMatchObject({id:'i1',enabled:false,expectedRevision:1});
+  await expect(page.locator('.integration-row.off .st-line')).toHaveText(/^Off · Slack/);await expect(page.locator('#host-status')).toHaveText('Ops is off');
   await page.getByRole('button',{name:'More for Ops'}).click();await expect(page.getByRole('menuitem')).toHaveText(['Turn on','Edit','Remove…']);await page.keyboard.press('Escape');
   // generic webhook with approved hosts returns a one-time secret
-  state.hostsReady=true;await page.getByRole('button',{name:'Integrations'}).click();await page.getByRole('button',{name:'Add integration',exact:true}).click();await expect(page.getByRole('menuitem')).toHaveText(['Slack','Discord','Webhook']);await page.getByRole('menuitem',{name:'Webhook'}).click();const hook=page.getByRole('dialog',{name:'Connect Webhook'});
+  state.hostsReady=true;await notifications(page);await page.getByRole('button',{name:'Add integration',exact:true}).click();await expect(page.getByRole('menuitem')).toHaveText(['Slack','Discord','Webhook']);await page.getByRole('menuitem',{name:'Webhook'}).click();const hook=page.getByRole('dialog',{name:'Connect Webhook'});
   await hook.getByLabel('Name',{exact:true}).fill('CRM');await hook.getByLabel('Endpoint URL').fill('https://crm.example/hooks');await hook.getByRole('button',{name:'Connect',exact:true}).click();
   const secret=page.getByRole('dialog',{name:'Signing secret'});await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveAttribute('type','password');await expect(secret.getByRole('button',{name:'Copy'})).toBeFocused();await secret.getByRole('button',{name:'Reveal'}).click();await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveValue('whsec_test_only_value');
   await page.screenshot({path:`${shots}/integration-secret.png`});await secret.getByRole('button',{name:'Done'}).click();await expect(page.locator('dialog')).toHaveCount(0);await expect(page.getByRole('button',{name:'Edit CRM'})).toBeFocused();
   expect(await page.evaluate(()=>JSON.stringify({...localStorage})+JSON.stringify({...sessionStorage}))).not.toContain('whsec');expect(await page.content()).not.toContain('whsec');
   state.deliveries.push({id:'dfail',integrationId:'i2',eventId:'e2',eventType:'booking.confirmed',state:'failed',attempts:4,nextAttemptAt:null,lastAttemptAt:Date.now()-60000,errorCode:'provider_rejected'},{id:'dheld',integrationId:'i2',eventId:'e3',eventType:'booking.cancelled',state:'quarantined',attempts:1,nextAttemptAt:null,lastAttemptAt:Date.now()-120000,errorCode:'restored'});
-  await page.getByRole('button',{name:'Integrations'}).click();await expect(page.getByText('1 delivery is held after a restore')).toBeVisible();
-  const crm=page.locator('.integration-row',{hasText:'CRM'});await expect(crm.locator('.pill')).toHaveText('Failing');await expect(crm.locator('.integration-problem')).toHaveText('Rejected by the destination. Check the URL.');
-  await expect(crm.getByRole('button',{name:'Send test notification to CRM'})).toBeVisible();await expect(page.locator('.integration-row',{hasText:'Ops'}).locator('.integration-problem')).toHaveCount(0);
+  await notifications(page);await expect(page.getByText('1 delivery is held after a restore')).toBeVisible();
+  const crm=page.locator('.integration-row',{hasText:'CRM'});await expect(crm.locator('.st-line-problem')).toHaveText('Failing · Rejected by the destination. Check the URL.');
+  await crm.getByRole('button',{name:'More for CRM'}).click();await expect(page.getByRole('menuitem',{name:'Send test'})).toBeVisible();await page.keyboard.press('Escape');await expect(page.locator('.integration-row',{hasText:'Ops'}).locator('.st-line-problem')).toHaveCount(0);
   await expect(page.locator('.integration-log > summary')).toContainText('2 need attention');
   await page.getByRole('button',{name:'Retry Booking confirmed'}).click();await expect(page.locator('#host-status')).toHaveText('Delivery queued for retry');
   await page.getByRole('button',{name:'Discard Booking cancelled'}).click();const discard=page.getByRole('dialog',{name:'Discard this delivery?'});await expect(discard).toContainText('will not be sent or replayed');await discard.getByRole('button',{name:'Discard delivery'}).click();
   await expect(page.getByText('held after a restore')).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/live/integrations/retry').map(r=>r.body)).toEqual([{deliveryId:'dfail'},{deliveryId:'dheld',action:'discard'}]);
   await page.screenshot({path:`${shots}/integrations-list.png`,fullPage:true});
-  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark mode'}).click();await page.screenshot({path:`${shots}/integrations-dark.png`,fullPage:true});
+  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark',exact:true}).click();await page.screenshot({path:`${shots}/integrations-dark.png`,fullPage:true});
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integrations-mobile.png`,fullPage:true});
 });
 
@@ -269,7 +299,9 @@ test('company notification link selects the company before loading the booking, 
   const state=await mock(page);await page.goto(base+`/studio?workspace=${ACME}#booking=${BID}`);
   const dialog=page.getByRole('dialog',{name:'Booking details'});await expect(dialog.getByRole('heading',{name:'Acme review'})).toBeVisible();
   const list=state.requests.findIndex(r=>r.path==='/api/live/workspaces'),firstScoped=state.requests.findIndex(r=>r.path==='/api/live/settings'||r.path.startsWith('/api/live/bookings'));
-  expect(list).toBeLessThan(firstScoped);expect(state.requests.filter(r=>r.path==='/api/live/settings'||r.path.startsWith('/api/live/bookings')).every(r=>r.ws===ACME)).toBeTruthy();
+  expect(list).toBeLessThan(firstScoped);expect(state.requests.filter(r=>r.path.startsWith('/api/live/bookings')).every(r=>r.ws===ACME)).toBeTruthy();
+  // Besides the company's settings, only the person's own profile is read, after the listing, for their name on the account button.
+  const reads=state.requests.filter(r=>r.path==='/api/live/settings');expect(reads.filter(r=>r.ws!==ACME)).toHaveLength(1);expect(reads.find(r=>r.ws!==ACME).ws).toBeNull();expect(state.requests.indexOf(reads.find(r=>r.ws===null))).toBeGreaterThan(list);
   expect(new URL(page.url()).search).toBe('');await expect(switcher(page)).toContainText('Acme');
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('scheduling-workspace')))).toMatchObject({account:'h_me',id:ACME});
 });
@@ -331,27 +363,48 @@ test('right after connecting, a test message reports delivery in the dialog and 
   await expect.poll(()=>state.deliveries.length).toBe(1);Object.assign(state.deliveries[0],{state:'failed',attempts:1,lastAttemptAt:Date.now(),errorCode:'provider_rejected'});
   await expect(connected.getByRole('status')).toHaveText('Not delivered: Rejected by the destination. Check the URL.',{timeout:8000});await expect(connected.getByRole('button',{name:'Send again'})).toBeEnabled();
   await page.screenshot({path:`${shots}/integration-connected-test.png`});
-  await expect(page.locator('.integration-row .integration-problem')).toHaveText('Rejected by the destination. Check the URL.');
+  await expect(page.locator('.integration-row .st-line-problem')).toHaveText('Failing · Rejected by the destination. Check the URL.');
   // While the result is still pending, Escape closes the dialog.
   await connected.getByRole('button',{name:'Send again'}).click();await expect.poll(()=>state.deliveries.length).toBe(2);
   await expect(async()=>{await page.keyboard.press('Escape');await expect(connected).toHaveCount(0,{timeout:250});}).toPass({timeout:5000});
 });
 
-test('activity shows what connected apps changed, opens the booking and disconnects an app',async({page})=>{
+test('connected apps list Email and AI apps; an app page shows its recent changes, opens a booking and disconnects it',async({page})=>{
   const state=await mock(page,{companies:false});const now=Date.now();
-  state.activity=[{id:'a1',at:now-60000,actor:{kind:'mcp',name:'Claude'},action:'decide_booking',summary:'Approved Personal booking with Guest on 2026-11-18 10:00',target:{type:'booking',id:'b'.repeat(20)}},{id:'a2',at:now-3600000,actor:{kind:'mcp',name:'Claude'},action:'update_hours',summary:'Updated availability: weekly hours',target:{type:'hours',id:'default'}}];
-  state.apps=[{id:'s1',name:'Claude',kind:'mcp',scope:'booking:read booking:settings booking:manage',createdAt:now-86400000,expiresAt:now+86400000},{id:'s2',name:'Email',scope:'booking:read email:tracking',createdAt:now-172800000,expiresAt:now+86400000}];
+  state.activity=[{id:'a1',at:now-60000,actor:{kind:'mcp',name:'Claude',sessionId:'s1'},action:'decide_booking',summary:'Approved Personal booking with Guest on 2026-11-18 10:00',target:{type:'booking',id:'b'.repeat(20)}},{id:'a2',at:now-3600000,actor:{kind:'mcp',name:'Claude',sessionId:'s1'},action:'update_hours',summary:'Updated availability: weekly hours',target:{type:'hours',id:'default'}},{id:'a3',at:now-7200000,actor:{kind:'mcp',name:'Cursor',sessionId:'gone'},action:'update_link',summary:'Updated link Intro (/intro)'}];
+  state.apps=[{id:'s1',name:'Claude',kind:'mcp',scope:'booking:read booking:settings booking:manage',createdAt:now-86400000,expiresAt:now+86400000},{id:'s2',name:"Email on Ada's Mac",scope:'booking:read email:tracking',createdAt:now-172800000,expiresAt:now+86400000},{id:'s3',name:'Tasks app',kind:'mcp',scope:'booking:read',createdAt:now-259200000,expiresAt:now+86400000}];
   await page.setViewportSize({width:1280,height:900});await page.goto(base+'/studio#activity');
-  await expect(page.locator('h1')).toHaveText('Activity');await expect(nav(page).getByRole('button',{name:'Activity'})).toHaveAttribute('aria-current','page');
-  await expect(page.locator('.activity-summary')).toHaveText(['Approved Personal booking with Guest on 2026-11-18 10:00','Updated availability: weekly hours']);
-  await expect(page.locator('.activity-endpoint code')).toHaveText(base+'/mcp');
-  await expect(page.locator('.activity-apps .lk-meta')).toHaveText([/^MCP · Full access · Connected/,/^Desktop app · Read only · Connected/]);
+  await expect(page.locator('h1')).toHaveText('Connected apps');await expect(page).toHaveURL(/#settings\/apps$/);
+  await expect(page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Connected apps'})).toHaveAttribute('aria-current','page');
+  const rows=page.locator('[data-app]');await expect(rows.locator('.st-name')).toHaveText(['Claude','Email','Tasks app']);
+  await expect(rows.locator('.st-line')).toHaveText(['Can make changes · 2 this week',"Ada's Mac · Read only",'Read only']);
+  await expect(rows.nth(0).locator('.st-tile svg path')).toHaveAttribute('fill','#D97757');await expect(rows.nth(1).locator('img')).toHaveAttribute('src','/email-app-icon.png');await expect(rows.nth(2).locator('.st-tile svg rect')).toHaveCount(1);
   await page.screenshot({path:`${shots}/activity.png`,fullPage:true});
+  await rows.nth(0).click();await expect(page).toHaveURL(/#settings\/apps\/s1$/);
+  await expect(page.locator('h1')).toHaveText('Claude');await expect(page.locator('.st-lead')).toHaveText(/^Can change your links, hours and bookings\. Connected /);
+  // An entry stored before structured detail keeps its words; its machine time reads like the Studio.
+  await expect(page.locator('.st-change-what')).toHaveText([/^Approved Personal booking with Guest on Wed,? (Nov 18|18 Nov), 10:00$/,'Updated availability: weekly hours']);
   await page.getByRole('button',{name:/Approved Personal booking/}).click();await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');
-  await page.getByRole('button',{name:'Disconnect Claude'}).click();await page.getByRole('dialog',{name:'Disconnect Claude?'}).getByRole('button',{name:'Disconnect'}).click();
-  await expect(page.getByRole('button',{name:'Disconnect Claude'})).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/device/revoke').map(r=>r.body)).toEqual([{sessionId:'s1'}]);
-  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/activity-mobile.png`,fullPage:true});
-  await page.getByRole('navigation',{name:'Sections'}).getByRole('button',{name:'More'}).click();await expect(page.locator('#account-menu').getByRole('button',{name:'Activity'})).toBeVisible();
+  await page.getByRole('button',{name:'Disconnect Claude'}).click();const confirm=page.getByRole('dialog',{name:'Disconnect Claude?'});await expect(confirm).toContainText('It loses access right away.');await confirm.getByRole('button',{name:'Disconnect'}).click();
+  await expect(page.locator('h1')).toHaveText('Connected apps');await expect(page.locator('#host-status')).toHaveText('Claude disconnected');await expect(rows).toHaveCount(2);
+  expect(state.requests.filter(r=>r.path==='/api/device/revoke').map(r=>r.body)).toEqual([{sessionId:'s1'}]);
+  await rows.nth(0).click();await page.getByRole('button',{name:'Connected apps',exact:true}).first().click();await expect(page.locator('h1')).toHaveText('Connected apps');
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await expect(page.getByRole('button',{name:'Settings',exact:true}).first()).toBeVisible();await page.screenshot({path:`${shots}/activity-mobile.png`,fullPage:true});
+});
+
+test('Add AI app shows the three steps and copies the full address; with nothing connected the steps are the page',async({page,context})=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  const state=await mock(page,{companies:false});state.apps=[{id:'s2',name:'Email on Mac',scope:'booking:read email:tracking',createdAt:Date.now()-86400000,expiresAt:Date.now()+86400000}];
+  await page.goto(base+'/studio#settings/apps');const add=page.getByRole('button',{name:'Add AI app',exact:true});await add.click();
+  const pop=page.getByRole('dialog',{name:'Add an AI app'});await expect(pop).toBeVisible();
+  await expect(pop.locator('li')).toHaveText(['In Claude, open Settings, then Connectors, then Add custom connector. Other AI apps have a similar option.',/^Paste this address:\s*127\.0\.0\.1:8791\/mcp\s*Copy$/,'Sign in to Scheduling and approve it. It shows up here.']);
+  await expect(pop.getByRole('button',{name:'Copy '+base+'/mcp'})).toBeFocused();await page.keyboard.press('Enter');
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(base+'/mcp');await expect(page.locator('#host-status')).toHaveText('Address copied');
+  await page.keyboard.press('Escape');await expect(pop).toBeHidden();await expect(add).toBeFocused();
+  await add.click();await page.locator('h1').click();await expect(pop).toBeHidden();
+  state.apps=[];await page.goto('about:blank');await page.goto(base+'/studio#settings/apps');
+  await expect(page.locator('h1')).toHaveText('Connected apps');await expect(page.getByRole('button',{name:'Add AI app'})).toHaveCount(0);await expect(page.locator('[data-app]')).toHaveCount(0);
+  await expect(page.locator('main .st-steps li')).toHaveCount(3);await expect(page.locator('main .st-steps code')).toHaveText('127.0.0.1:8791/mcp');
 });
 
 test('integration cards open the selected destination with the webhook gate intact',async({page})=>{
@@ -363,10 +416,10 @@ test('integration cards open the selected destination with the webhook gate inta
     await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Connect '+kind,exact:true})).toBeFocused();
   }
   await expect(page.getByRole('button',{name:'Connect Webhook',exact:true})).toHaveCount(0);await expect(page.locator('.integration-choice.is-unavailable')).toContainText('Webhook');
-  await page.setViewportSize({width:390,height:844});await page.locator('[data-more]').click();await page.getByRole('button',{name:'Dark mode'}).click();await expect(page.locator('.integration-choice')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
+  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark',exact:true}).click();await page.keyboard.press('Escape');await page.setViewportSize({width:390,height:844});await expect(page.locator('.integration-choice')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
 });
 
 test('an image still decoding cannot be applied to a profile selected afterwards',async({page})=>{
- const state=await mock(page);await page.goto(base+'/studio#link=intro');await page.evaluate(()=>{const decode=HTMLImageElement.prototype.decode;HTMLImageElement.prototype.decode=async function(){await decode.call(this);window.waitingImageDecode=true;await new Promise(resolve=>window.releaseImageDecode=resolve);};});
- const pickerPromise=page.waitForEvent('filechooser');await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Change profile picture',exact:true}).click();await (await pickerPromise).setFiles(new URL('./fixtures/avatar.jpg',import.meta.url).pathname);await page.waitForFunction(()=>window.waitingImageDecode);await switchTo(page,'Acme');await page.evaluate(()=>window.releaseImageDecode());await expect.poll(()=>page.locator('[data-profile-upload]').count()).toBe(0);await expect(page.getByRole('dialog',{name:/Crop /})).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/live/settings'&&r.method==='POST')).toHaveLength(0);await expect(switcher(page)).toContainText('Acme');
+ const state=await mock(page);await page.goto(base+'/studio#settings/profile');await expect(page.locator('h1')).toHaveText('Profile');await page.evaluate(()=>{const decode=HTMLImageElement.prototype.decode;HTMLImageElement.prototype.decode=async function(){await decode.call(this);window.waitingImageDecode=true;await new Promise(resolve=>window.releaseImageDecode=resolve);};});
+ const pickerPromise=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Change photo',exact:true}).click();await (await pickerPromise).setFiles(new URL('./fixtures/avatar.jpg',import.meta.url).pathname);await page.waitForFunction(()=>window.waitingImageDecode);await page.getByRole('button',{name:'Back',exact:true}).click();await switchTo(page,'Acme');await page.evaluate(()=>window.releaseImageDecode());await expect.poll(()=>page.locator('[data-profile-upload]').count()).toBe(0);await expect(page.getByRole('dialog',{name:/Crop /})).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/live/settings'&&r.method==='POST')).toHaveLength(0);await expect(switcher(page)).toContainText('Acme');
 });

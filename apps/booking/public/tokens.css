@@ -1,4 +1,7 @@
 :root{--canvas:#f8f9fa;--surface:#ffffff;--soft:#f1f2f3;--ink:#202020;--muted:#72747a;--line:#e3e4e6;--accent:#555b60;--tint:#f0f1f3;--avatar-line:#e1e3e6;color-scheme:light}
+/* Studio sidebar, account menu and Settings: quiet greys, one red for destructive actions. */
+:root{--ui-ink:#0a0a0a;--ui-ink-2:#404040;--ui-muted:#737373;--ui-faint:#a3a3a3;--ui-line:#ebebeb;--ui-hover:#f4f4f4;--ui-tile:#f4f4f4;--ui-pill:#f0f0f0;--ui-field:#f5f5f5;--ui-red:#c0271d;--ui-red-soft:#fbefee;--ui-pop-shadow:0 0 0 1px #ebebeb,0 12px 32px #0000001a}
+[data-theme=dark]{--ui-ink:#f2f2f2;--ui-ink-2:#d0d0d0;--ui-muted:#a3a3a3;--ui-faint:#737373;--ui-line:#2b2b2b;--ui-hover:#262626;--ui-tile:#262626;--ui-pill:#2c2c2c;--ui-field:#232323;--ui-red:#f2786d;--ui-red-soft:#3a1f1c;--ui-pop-shadow:0 0 0 1px #2e2e2e,0 12px 32px #00000080}
 [data-accent=iris]{--accent:#796292;--tint:#eee8f4;--avatar-line:#ddd0e8}
 [data-accent=sage]{--accent:#567866;--tint:#e8eee7;--avatar-line:#d1ded2}
 [data-accent=graphite]{--accent:#555b60;--tint:#e9ecee;--avatar-line:#d7dcdf}

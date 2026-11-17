@@ -1,6 +1,6 @@
 // Company members manage their own calendar and hours on the Availability
 // page (saved to /api/live/my-calendar in the company), see readiness on the
-// Team page, and stop sharing from the account menu's Calendar access.
+// Team page, and stop sharing from Calendar access in Settings → Sign-in & data.
 import {test,expect} from '@playwright/test';
 import {DEFAULT} from '../public/policy.js';
 const base=process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791',company='h_'+'C'.repeat(24),person='h_'+'P'.repeat(24);
@@ -29,9 +29,12 @@ const busy=(page,name)=>panel(page).getByRole('checkbox',{name:new RegExp('^'+na
 const toggle=(page,name)=>panel(page).locator('label.av-check').filter({has:page.locator('.av-cal-name',{hasText:new RegExp('^'+name+'$')})}).click();
 const sidebar=page=>page.getByRole('navigation',{name:'Scheduling'});
 const status=page=>page.locator('[data-av-status]');
+async function calendarAccess(page){
+ await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Sign-in & data'}).click();
+ return page.getByRole('region',{name:'Calendar access'});
+}
 async function stopSharing(page){
- await page.getByRole('button',{name:'Account menu'}).click();await page.getByRole('button',{name:'Calendar access',exact:true}).click();
- const access=page.getByRole('dialog',{name:'Calendar access',exact:true});await access.getByRole('button',{name:'Stop sharing ada@example.com with Acme',exact:true}).click();
+ const access=await calendarAccess(page);await access.getByRole('button',{name:'Stop sharing ada@example.com with Acme',exact:true}).click();
  const confirm=page.getByRole('dialog',{name:'Stop sharing with Acme?'});await expect(confirm).toContainText('Existing Google meetings remain.');
  return {access,confirm};
 }
@@ -53,9 +56,9 @@ test('member edits one availability, saves own calendar choices in the company, 
  const {access,confirm}=await stopSharing(page);await confirm.getByRole('button',{name:'Cancel',exact:true}).click();
  expect(state.requests.filter(r=>r.path.endsWith('/withdraw'))).toHaveLength(0);
  await access.getByRole('button',{name:'Stop sharing ada@example.com with Acme',exact:true}).click();await page.getByRole('dialog',{name:'Stop sharing with Acme?'}).getByRole('button',{name:'Stop sharing',exact:true}).click();
- await expect(access.getByText('Calendar sharing stopped',{exact:true})).toBeVisible();
+ await expect(access.getByText(/Calendar sharing stopped/)).toBeVisible();
  expect(state.requests.filter(r=>r.path==='/api/live/calendar-contributions/withdraw').map(r=>r.body)).toEqual([{workspaceId:company,accountId:'mine'}]);
- await access.getByRole('button',{name:'Close calendar access'}).click();
+ await page.getByRole('button',{name:'Back',exact:true}).click();await sidebar(page).getByRole('button',{name:'Availability',exact:true}).click();
  // Availability now offers to connect again instead of calendar choices.
  await expect(page.locator('.setup-callout').getByRole('link',{name:'Continue with Google',exact:true})).toHaveAttribute('href',`/auth/google?connect=1&workspace=${company}&own=1`);
  await expect(panel(page).locator('[data-busy],[data-destination]')).toHaveCount(0);
@@ -90,7 +93,7 @@ test('admin’s own calendar stays private to them, draft preview makes no booki
 });
 
 test('former contribution withdrawal is account scoped even in a company',async({page})=>{
- const state=await fixture(page,{role:'viewer'});await page.goto(base+'/studio');await page.getByRole('button',{name:'Account menu'}).click();await page.getByRole('button',{name:'Calendar access',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Calendar access',exact:true});await dialog.getByRole('button',{name:/^Stop sharing ada@example\.com with /}).click();const stop=page.getByRole('dialog',{name:/^Stop sharing with /});await expect(stop.getByRole('button',{name:'Stop sharing',exact:true})).toHaveClass(/danger-button/);await stop.getByRole('button',{name:'Stop sharing',exact:true}).click();await expect.poll(()=>state.requests.filter(r=>r.path.endsWith('/calendar-contributions/withdraw')).length).toBe(1);expect(state.requests.filter(r=>r.path.includes('calendar-contributions')).every(r=>!r.ws)).toBe(true);await expect(page.getByRole('button',{name:'Availability',exact:true})).toHaveCount(0);await expect(dialog.getByText('Calendar sharing stopped',{exact:true})).toBeVisible();await expect(dialog.getByRole('button',{name:/^Stop sharing /})).toHaveCount(0);
+ const state=await fixture(page,{role:'viewer'});await page.goto(base+'/studio');const dialog=await calendarAccess(page);await dialog.getByRole('button',{name:/^Stop sharing ada@example\.com with /}).click();const stop=page.getByRole('dialog',{name:/^Stop sharing with /});await expect(stop.getByRole('button',{name:'Stop sharing',exact:true})).toHaveClass(/danger-button/);await stop.getByRole('button',{name:'Stop sharing',exact:true}).click();await expect.poll(()=>state.requests.filter(r=>r.path.endsWith('/calendar-contributions/withdraw')).length).toBe(1);expect(state.requests.filter(r=>r.path.includes('calendar-contributions')).every(r=>!r.ws)).toBe(true);await expect(page.getByRole('button',{name:'Availability',exact:true})).toHaveCount(0);await expect(dialog.getByText(/Calendar sharing stopped/)).toBeVisible();await expect(dialog.getByRole('button',{name:/^Stop sharing /})).toHaveCount(0);
 });
 
 test('a background calendars load cannot dismiss a pending withdrawal',async({page})=>{
@@ -99,7 +102,8 @@ test('a background calendars load cannot dismiss a pending withdrawal',async({pa
  const {confirm}=await stopSharing(page);await confirm.getByRole('button',{name:'Stop sharing',exact:true}).click();
  await expect.poll(()=>!!releaseWithdrawal&&!!releaseCalendars).toBe(true);releaseCalendars();await page.waitForTimeout(200);await expect(confirm).toBeVisible();await expect(confirm.getByRole('button',{name:'Working…'})).toBeDisabled();
  releaseWithdrawal();await expect(confirm).toHaveCount(0);
- const access=page.getByRole('dialog',{name:'Calendar access',exact:true});await expect(access.getByText('Calendar sharing stopped',{exact:true})).toBeVisible();await access.getByRole('button',{name:'Close calendar access'}).click();
+ const access=page.getByRole('region',{name:'Calendar access'});await expect(access.getByText(/Calendar sharing stopped/)).toBeVisible();await expect(page.getByText('2 accepted bookings in Acme need review.')).toBeVisible();
+ await page.getByRole('button',{name:'Back',exact:true}).click();await sidebar(page).getByRole('button',{name:'Availability',exact:true}).click();
  await expect(panel(page).locator('[data-destination]')).toHaveCount(0);
 });
 
@@ -123,5 +127,5 @@ test('an hours change before a booking calendar is chosen is not saved and says 
  await page.waitForTimeout(500);expect(state.requests.filter(r=>r.path==='/api/live/my-calendar'&&r.body)).toHaveLength(0);
 });
 test('unavailable contribution state offers retry, never a misleading withdrawal action',async({page})=>{
- await fixture(page,{role:'viewer'});let failed=true;await page.route('**/api/live/calendar-contributions',r=>r.fulfill({json:{contributions:[{workspaceId:company,accountId:'mine',email:'ada@example.com',...(failed?{unavailable:true}:{withdrawn:true,connected:false})}]}}));await page.goto(base+'/studio');await page.getByRole('button',{name:'Account menu'}).click();await page.getByRole('button',{name:'Calendar access',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Calendar access',exact:true});await expect(dialog.getByRole('button',{name:/^Stop sharing /})).toHaveCount(0);failed=false;await dialog.getByRole('button',{name:'Retry',exact:true}).click();await expect(dialog.getByText('Calendar sharing stopped',{exact:true})).toBeVisible();
+ await fixture(page,{role:'viewer'});let failed=true;await page.route('**/api/live/calendar-contributions',r=>r.fulfill({json:{contributions:[{workspaceId:company,accountId:'mine',email:'ada@example.com',...(failed?{unavailable:true}:{withdrawn:true,connected:false})}]}}));await page.goto(base+'/studio');const dialog=await calendarAccess(page);await expect(dialog.getByRole('button',{name:/^Stop sharing /})).toHaveCount(0);failed=false;await dialog.getByRole('button',{name:'Retry',exact:true}).click();await expect(dialog.getByText(/Calendar sharing stopped/)).toBeVisible();
 });

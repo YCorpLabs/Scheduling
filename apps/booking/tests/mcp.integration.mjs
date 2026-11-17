@@ -90,7 +90,7 @@ test('an MCP client connects with OAuth, manages links and hours, and every chan
 
     // Every change is attributed to the app, for the agent and for the Studio.
     const activity=(await tool('get_activity')).activity;assert.deepEqual(activity.map(a=>a.action),['delete_link','update_hours','update_link','create_link']);assert.ok(activity.every(a=>a.by==='Claude'));
-    const studio=await (await call('/api/live/activity',{cookie})).json();assert.equal(studio.activity[0].summary,'Deleted link Coffee (/coffee-chat)');assert.equal(studio.activity[0].actor.kind,'mcp');assert.equal(studio.activity[0].actor.email,'ada@example.com');
+    const studio=await (await call('/api/live/activity',{cookie})).json();assert.equal(studio.activity[0].summary,'Deleted the Coffee link');assert.deepEqual(studio.activity[0].detail,{link:'Coffee'});assert.equal(studio.activity[0].actor.kind,'mcp');assert.equal(studio.activity[0].actor.email,'ada@example.com');
     // MCP connections cannot bypass the log through the desktop routes.
     assert.equal((await call('/api/device/settings',{headers:{Authorization:'Bearer '+token.access_token}})).status,403);
 

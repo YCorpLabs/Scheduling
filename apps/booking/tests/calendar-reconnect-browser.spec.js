@@ -104,10 +104,10 @@ test('Availability shows reconnect needed while keeping the member’s hours and
   await noSideways(page);
  }
  await page.setViewportSize({width:1280,height:800});
- // Stop sharing stays available from the account menu.
- await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Calendar access',exact:true}).click();
- const access=page.getByRole('dialog',{name:'Calendar access',exact:true});await expect(access.getByRole('button',{name:'Stop sharing ada.lovelace.with-a-long-address@example.com with Acme',exact:true})).toBeVisible();
- await access.getByRole('button',{name:'Close calendar access'}).click();
+ // Stop sharing stays available in Settings → Sign-in & data → Calendar access.
+ await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Sign-in & data'}).click();
+ const access=page.getByRole('region',{name:'Calendar access'});await expect(access.getByRole('button',{name:'Stop sharing ada.lovelace.with-a-long-address@example.com with Acme',exact:true})).toBeVisible();
+ await noSideways(page);await page.getByRole('button',{name:'Back',exact:true}).click();
  // The Team page shows the same state for the member.
  await sidebar(page).getByRole('button',{name:'Team',exact:true}).click();
  const self=page.locator('.team-row').filter({hasText:'You'});await expect(self.locator('.team-person small').last()).toHaveText('Reconnect needed');

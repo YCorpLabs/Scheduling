@@ -7,8 +7,8 @@ const caps=role=>({readBookings:true,readAnalytics:true,approveBookings:role!=='
 const settings=(hostId,name)=>({revision:'A'.repeat(43),hostId,profile:{name,email:'ada@example.com'},accounts:[],meetingTypes:[{...DEFAULT,id:'intro',slug:'intro',title:name+' intro'}]});
 const page1=(scope,sections,nextCursor)=>({schema:1,generatedAt:1794484800000,scope,sections,nextCursor});
 
-async function mock(page,{role='admin',exports={}}={}){
- const state={role,requests:[],exports,held:{}};
+async function mock(page,{role='admin',exports={},sessions=[{id:'s1',current:true,createdAt:Date.now()-3600000,lastSeenAt:Date.now(),expiresAt:Date.now()+86400000}]}={}){
+ const state={role,requests:[],exports,held:{},sessions};
  await page.route('**/api/**',async route=>{
   const req=route.request(),path=new URL(req.url()).pathname,ws=req.headers()['x-scheduling-workspace']||null,body=req.postDataJSON?.()??null;
   state.requests.push({path,ws,body,expectedAccount:req.headers()['x-scheduling-account']||null});const json=(data,status=200)=>route.fulfill({status,json:data});
@@ -22,7 +22,8 @@ async function mock(page,{role='admin',exports={}}={}){
   }
   if(path==='/api/live/settings')return json(ws?{...settings(ws,ws===company?'Acme':'Beta'),workspace:{id:ws,role:state.role,capabilities:caps(state.role)}}:settings('h_me','Ada'));
   if(path==='/api/live/workspace')return json({members:[{id:'h_me',email:'ada@example.com',role:state.role},{id:'h_owner',email:'owner@acme.test',role:'owner'}],invitations:[]});
-  if(path==='/api/live/sessions')return json({sessions:[{id:'s1',current:true,createdAt:Date.now()-3600000,expiresAt:Date.now()+86400000}]});
+  if(path==='/api/live/sessions')return json({sessions:state.sessions});
+  if(path==='/api/live/sessions/revoke')return json({revoked:true});
   if(path==='/api/live/calendars')return json({accounts:[]});
   if(path==='/api/live/calendar-contributions')return json({contributions:[]});
   if(path==='/api/live/operations')return json({generatedAt:Date.now(),issues:[]});
@@ -35,43 +36,48 @@ const paged=(scope,script)=>({body})=>{const step=script[body?.cursor??'start'];
 async function downloaded(page,click){const [download]=await Promise.all([page.waitForEvent('download'),click()]);const chunks=[];for await(const chunk of await download.createReadStream())chunks.push(chunk);return {name:download.suggestedFilename(),json:JSON.parse(Buffer.concat(chunks).toString('utf8'))};}
 const exportRequests=state=>state.requests.filter(r=>r.path.endsWith('/export'));
 
-test('Manage account keeps the menu size, opens nested sessions and restores focus',async({page})=>{
- await mock(page);await page.goto(base+'/studio');const trigger=page.locator('#account-trigger');
- await trigger.click();const items=page.locator('#account-menu button');const count=await items.count();
- await expect(page.locator('#account-menu').getByRole('button',{name:'Signed-in browsers'})).toHaveCount(0);
- await page.getByRole('button',{name:'Manage account',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Account',exact:true});await expect(dialog.getByText('ada@example.com',{exact:true})).toBeVisible();await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/account-export-desktop.png`});
- await expect(dialog.getByRole('button',{name:'Delete account…',exact:true})).toBeVisible();await expect(dialog.getByRole('button',{name:/Revoke/})).toHaveCount(0);await expect(dialog.getByText(/coming soon/i)).toHaveCount(0);
- const sessions=dialog.getByRole('button',{name:'Manage signed-in browsers',exact:true});await expect(sessions).toBeFocused();
- await page.keyboard.press('Enter');const nested=page.getByRole('dialog',{name:'Signed-in browsers',exact:true});await expect(nested.getByText('Current session')).toBeVisible();
- await page.keyboard.press('Escape');await expect(nested).toHaveCount(0);await expect(sessions).toBeFocused();await expect(dialog).toBeVisible();
- await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(trigger).toBeFocused();
- await trigger.click();await expect(items).toHaveCount(count);
+test('Sign-in & data lists browsers inline; another browser signs out after a confirmation',async({page})=>{
+ const state=await mock(page,{sessions:[{id:'s1',current:true,createdAt:Date.now()-3600000,lastSeenAt:Date.now(),expiresAt:Date.now()+86400000},{id:'s2',device:'Safari on iPhone',mobile:true,createdAt:Date.now()-9*86400000,lastSeenAt:Date.now()-3*86400000-60000,expiresAt:Date.now()+86400000}]});
+ await page.goto(base+'/studio');await page.locator('#account-trigger').click();
+ // The account menu holds only who is signed in, Theme and Sign out.
+ await expect(page.locator('#account-menu button')).toHaveText(['Light','Dark','Auto','Sign out']);
+ await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Sign-in & data'}).click();
+ await expect(page.getByRole('heading',{name:'Sign-in & data',level:1})).toBeVisible();await expect(page.getByText('You sign in with Google as ada@example.com.',{exact:true})).toBeVisible();
+ await expect(page.getByText('This browser',{exact:true})).toBeVisible();await expect(page.getByText('Last used 3 days ago',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:/^Sign out/})).toHaveCount(1);
+ await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/account-export-desktop.png`});
+ const signOut=page.getByRole('button',{name:'Sign out Safari on iPhone',exact:true});await signOut.click();
+ const confirm=page.getByRole('dialog',{name:'Sign out this browser?'});await expect(confirm.getByText('Anyone using that browser will need to sign in again.')).toBeVisible();
+ await confirm.getByRole('button',{name:'Cancel',exact:true}).click();await expect(signOut).toBeFocused();expect(state.requests.filter(r=>r.path==='/api/live/sessions/revoke')).toHaveLength(0);
+ await signOut.click();state.sessions=state.sessions.slice(0,1);await page.getByRole('dialog',{name:'Sign out this browser?'}).getByRole('button',{name:'Sign out',exact:true}).click();
+ await expect(page.getByText('Safari on iPhone')).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/live/sessions/revoke').map(r=>[r.ws,r.body])).toEqual([[null,{id:'s2'}]]);
 });
 
 test('account export reads every page without a profile header and downloads only when complete',async({page})=>{
  let release;const state=await mock(page,{exports:{account:paged('account',{start:{json:page1('account',[{name:'profile',data:{name:'Ada'}}],'c1')},c1:()=>new Promise(r=>{release=()=>r({json:page1('account',[{name:'bookings',data:[{id:'b1'}]}],'c2')});}),c2:{json:page1('account',[{name:'bookings',data:[{id:'b2'}]}],null)}})}});
- await page.goto(base+`/studio?workspace=${company}`);await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Manage account',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Account',exact:true});await dialog.getByRole('button',{name:'Export your data',exact:true}).click();
+ // The account export never sends the open team's header, even from a team.
+ await page.goto(base+`/studio?workspace=${company}`);await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Sign-in & data'}).click();
+ const dialog=page.locator('[data-account-export]');await expect(dialog.getByText('Everything Scheduling stores about you',{exact:true})).toBeVisible();await dialog.getByRole('button',{name:'Download your data',exact:true}).click();
  await expect(dialog.getByRole('status').filter({hasText:'Preparing export…'})).toBeVisible();await expect(dialog.getByRole('link',{name:'Download'})).toHaveCount(0);
  await expect.poll(()=>!!release).toBe(true);release();
  const link=dialog.getByRole('link',{name:'Download',exact:true});await expect(link).toBeVisible();
  const file=await downloaded(page,()=>link.click());expect(file.name).toMatch(/^scheduling-account-\d{4}-\d{2}-\d{2}\.json$/);
  expect(file.json.sections).toEqual([{name:'profile',data:{name:'Ada'}},{name:'bookings',data:[{id:'b1'},{id:'b2'}]}]);
  expect(exportRequests(state).map(r=>[r.ws,r.body])).toEqual([[null,{}],[null,{cursor:'c1'}],[null,{cursor:'c2'}]]);
- const href=await link.getAttribute('href');await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);
+ const href=await link.getAttribute('href');await page.getByRole('button',{name:'Back',exact:true}).click();await expect(dialog).toHaveCount(0);
  expect(await page.evaluate(async url=>{try{await fetch(url);return 'readable';}catch{return 'revoked';}},href)).toBe('revoked');
 });
 
 test('a failed page can be retried from its cursor; changed data discards and needs Export again',async({page})=>{
  let failOnce=true;const state=await mock(page,{exports:{account:paged('account',{start:{json:page1('account',[{name:'a',data:[1]}],'c1')},c1:()=>failOnce?(failOnce=false,{status:503,json:{error:'Unavailable'}}):{json:page1('account',[{name:'a',data:[2]}],'c2')},c2:{status:409,json:{error:'Your data changed.',code:'export_changed'}}})}});
- await page.goto(base+'/studio');await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Manage account',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Account',exact:true});await dialog.getByRole('button',{name:'Export your data',exact:true}).click();
+ await page.goto(base+'/studio#settings/account');
+ const dialog=page.locator('[data-account-export]');await dialog.getByRole('button',{name:'Download your data',exact:true}).click();
  await expect(dialog.getByRole('alert')).toContainText('Export paused');await expect(dialog.getByRole('link',{name:'Download'})).toHaveCount(0);
  await expect(dialog.getByRole('button',{name:'Try again',exact:true})).toBeFocused();await page.keyboard.press('Enter');
  await expect(dialog.getByRole('alert')).toContainText('Data changed during export');await expect(dialog.getByRole('link',{name:'Download'})).toHaveCount(0);
  expect(exportRequests(state).map(r=>r.body)).toEqual([{},{cursor:'c1'},{cursor:'c1'},{cursor:'c2'}]);
- await expect(dialog.getByRole('button',{name:'Export again',exact:true})).toBeFocused();
+ await expect(dialog.getByRole('button',{name:'Try again',exact:true})).toBeFocused();
  state.exports.account={json:page1('account',[{name:'a',data:[9]}],null)};await page.keyboard.press('Enter');
  expect((await downloaded(page,()=>dialog.getByRole('link',{name:'Download',exact:true}).click())).json.sections).toEqual([{name:'a',data:[9]}]);
  expect(exportRequests(state).at(-1).body).toEqual({});
@@ -105,21 +111,23 @@ test('switching profile mid-export ignores the late page',async({page})=>{
  expect(exportRequests(state).map(r=>r.ws)).toEqual([company]);
 });
 
-test('390 px: More opens Manage account, which fits, and export is usable by keyboard',async({page,browserName})=>{
+test('390 px: Settings opens as a list, Sign-in & data fits, and export is usable by keyboard',async({page})=>{
  await page.setViewportSize({width:390,height:844});await mock(page,{exports:{account:{json:page1('account',[{name:'a',data:[]}],null)}}});await page.goto(base+'/studio');
- await expect(page.locator('#account-trigger')).toBeHidden();const trigger=page.locator('[data-more]');await expect(trigger).toBeVisible();
- await trigger.focus();await page.keyboard.press('Enter');for(let i=0;i<8&&!await page.getByRole('button',{name:'Manage account',exact:true}).evaluate(e=>e===document.activeElement);i++)await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');
- const dialog=page.getByRole('dialog',{name:'Account',exact:true});await expect(dialog).toBeVisible();const box=await dialog.boundingBox();expect(box.x).toBeGreaterThanOrEqual(0);expect(box.x+box.width).toBeLessThanOrEqual(390);
- await page.keyboard.press(browserName==='webkit'?'Alt+Tab':'Tab');await expect(dialog.getByRole('button',{name:'Export your data',exact:true})).toBeFocused();await page.keyboard.press('Enter');
- const link=dialog.getByRole('link',{name:'Download',exact:true});await expect(link).toBeFocused();expect((await link.boundingBox()).height).toBeGreaterThanOrEqual(44);
+ await expect(page.locator('#account-trigger')).toBeHidden();const tabs=page.getByRole('navigation',{name:'Sections'});await tabs.getByRole('button',{name:'Settings',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Settings',level:1})).toBeVisible();await page.getByRole('button',{name:/^Sign-in & data/}).click();
+ await expect(page.getByRole('heading',{name:'Sign-in & data',level:1})).toBeVisible();await expect(page.getByRole('button',{name:'Settings',exact:true}).first()).toBeVisible();
+ const start=page.getByRole('button',{name:'Download your data',exact:true});await start.focus();await page.keyboard.press('Enter');
+ const link=page.getByRole('link',{name:'Download',exact:true});await expect(link).toBeFocused();
+ // Theme and Sign out are on this page on phones, where the account menu is not shown.
+ await expect(page.getByRole('group',{name:'Theme'})).toBeVisible();await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await page.screenshot({path:(process.env.BOOKING_SCREENSHOT_DIR||'test-results')+'/account-export-390.png'});
+ await page.screenshot({path:(process.env.BOOKING_SCREENSHOT_DIR||'test-results')+'/account-export-390.png',fullPage:true});
 });
 
 
 test('a stale account tab refuses export after the shared signed-in identity changes',async({page})=>{
- const state=await mock(page,{exports:{account:{status:409,json:{error:'Account changed',code:'export_account_changed'}}}});await page.goto(base+'/studio');await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Manage account',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Account',exact:true});await dialog.getByRole('button',{name:'Export your data',exact:true}).click();
- await expect(dialog.getByRole('alert')).toContainText('The signed-in account changed. Reload Scheduling.');await expect(dialog.getByRole('link',{name:'Download'})).toHaveCount(0);await expect(dialog.getByRole('button',{name:'Export again'})).toHaveCount(0);
- expect(exportRequests(state).map(r=>r.expectedAccount)).toEqual(['h_me']);await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);
+ const state=await mock(page,{exports:{account:{status:409,json:{error:'Account changed',code:'export_account_changed'}}}});await page.goto(base+'/studio#settings/account');
+ const dialog=page.locator('[data-account-export]');await dialog.getByRole('button',{name:'Download your data',exact:true}).click();
+ await expect(dialog.getByRole('alert')).toContainText('The signed-in account changed. Reload Scheduling.');await expect(dialog.getByRole('link',{name:'Download'})).toHaveCount(0);await expect(dialog.getByRole('button',{name:'Try again'})).toHaveCount(0);
+ expect(exportRequests(state).map(r=>r.expectedAccount)).toEqual(['h_me']);
 });

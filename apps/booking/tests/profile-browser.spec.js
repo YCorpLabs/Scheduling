@@ -5,36 +5,60 @@ import {validateBrandImage} from '../public/branding.js';
 const base=process.env.BOOKING_TEST_ORIGIN||'http://127.0.0.1:8791';
 const fixture=kind=>new URL('./fixtures/'+kind+'.jpg',import.meta.url).pathname;
 async function setup(page,{allowMeetings=false}={}){
- let saved={revision:'A'.repeat(43),profile:{name:'Ada Lind',email:'owner@example.com'},accounts:[],meetingTypes:[{...DEFAULT,id:'intro',slug:'intro',published:false}]};const writes=[];
+ let saved={revision:'A'.repeat(43),profile:{name:'Ada Lind',company:'',email:'owner@example.com'},accounts:[],meetingTypes:[{...DEFAULT,id:'intro',slug:'intro',title:'Intro call',duration:30,locationType:'google_meet',published:false}]};const writes=[];
  await page.route('**/api/**',async route=>{const path=new URL(route.request().url()).pathname;let data=saved;
  if(path==='/api/bootstrap')data={mode:'live',authenticated:true,hostId:'h_abcdefghijklmnopqrstuvwx',email:'owner@example.com'};
  if(path==='/api/live/calendars')data={accounts:[]};
- if(path==='/api/live/settings'&&route.request().method()==='POST'){const body=route.request().postDataJSON();expect(body.expectedRevision).toBe(saved.revision);expect(Object.keys(body.patch)).toEqual(body.patch.profile?['profile']:allowMeetings?['meetingTypes']:['profile']);if(body.patch.profile)for(const key of Object.keys(body.patch.profile))validateBrandImage(body.patch.profile[key],key);if(body.patch.meetingTypes)body.patch.meetingTypes.forEach(validateConfig);writes.push(body);saved={...saved,...(body.patch.meetingTypes?{meetingTypes:body.patch.meetingTypes}:{}),profile:{...saved.profile,...body.patch.profile},revision:String.fromCharCode(66+writes.length).repeat(43)};data={settings:saved,revision:saved.revision};}
+ if(path==='/api/live/settings'&&route.request().method()==='POST'){const body=route.request().postDataJSON();expect(body.expectedRevision).toBe(saved.revision);expect(Object.keys(body.patch)).toEqual(body.patch.profile?['profile']:allowMeetings?['meetingTypes']:['profile']);if(body.patch.profile)for(const key of Object.keys(body.patch.profile))if(key.endsWith('Image'))validateBrandImage(body.patch.profile[key],key);if(body.patch.meetingTypes)body.patch.meetingTypes.forEach(validateConfig);writes.push(body);saved={...saved,...(body.patch.meetingTypes?{meetingTypes:body.patch.meetingTypes}:{}),profile:{...saved.profile,...body.patch.profile},revision:String.fromCharCode(66+writes.length).repeat(43)};data={settings:saved,revision:saved.revision};}
  return route.fulfill({json:data});});await page.goto(base+'/studio#link=intro');return {writes,get profile(){return saved.profile;},get settings(){return saved;}};
 }
-// The picture saves on its own from the account menu; the banner is changed in Edit profile.
-async function changePicture(page,kind){await page.locator('#account-trigger').click();const pickerPromise=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Change profile picture',exact:true}).click();await (await pickerPromise).setFiles(fixture(kind));}
-async function crop(page,key,kind,{cancel=false}={}){
- await page.locator(`[data-upload="${key}"]`).setInputFiles(fixture(kind));const dialog=page.getByRole('dialog',{name:/Crop /});await expect(dialog).toBeVisible();
- if(cancel){await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Save profile',exact:true})).toBeEnabled();return;}
+// Settings → Profile stages photo and banner crops with name and company; one Save writes them.
+async function pick(page,label,kind){const pickerPromise=page.waitForEvent('filechooser');await page.getByRole('button',{name:label,exact:true}).click();await (await pickerPromise).setFiles(fixture(kind));}
+async function crop(page,label,kind,{cancel=false}={}){
+ await pick(page,label,kind);const dialog=page.getByRole('dialog',{name:/Crop /});await expect(dialog).toBeVisible();
+ if(cancel){await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await expect(dialog).toHaveCount(0);return;}
  await dialog.getByLabel('Zoom',{exact:true}).focus();await page.keyboard.press('End');await dialog.getByLabel('Horizontal position',{exact:true}).focus();await page.keyboard.press('End');expect(await dialog.locator('canvas').evaluate(canvas=>canvas.getContext('2d').getImageData(0,0,1,1).data[0])).toBeLessThan(120);
- await dialog.getByRole('button',{name:'Use image',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Save profile',exact:true})).toBeEnabled();
+ await dialog.getByRole('button',{name:'Use image',exact:true}).click();await expect(dialog).toHaveCount(0);
 }
-test('profile upload crops both images, saves once and is discoverable from Appearance and account',async({page})=>{
- const state=await setup(page);await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Edit profile',exact:true}).click();const profile=page.getByRole('dialog',{name:'Edit profile',exact:true});
- await crop(page,'avatarImage','avatar');await crop(page,'bannerImage','banner');await expect(profile.getByRole('img',{name:'Profile picture',exact:true})).toBeVisible();await expect(profile.getByRole('img',{name:'Banner image',exact:true})).toBeVisible();expect(state.writes).toHaveLength(0);
- await profile.getByRole('button',{name:'Save profile',exact:true}).click();await expect(profile).toHaveCount(0);expect(state.writes).toHaveLength(1);await expect(page.locator('#host-status')).toBeEmpty();await expect(page.locator('.host-avatar img')).toBeVisible();
- await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));await page.getByRole('button',{name:'Name and picture ↗',exact:true}).click();await expect(profile).toBeVisible();await expect(profile.getByRole('img',{name:'Banner image',exact:true})).toBeVisible();await expect(profile.getByRole('img',{name:'Profile picture',exact:true})).toBeVisible();await page.keyboard.press('Escape');await expect(profile).toHaveCount(0);await expect(page.locator('[data-profile=appearance]')).toBeFocused();expect(state.writes).toHaveLength(1);
+const openProfile=async page=>{await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();};
+
+test('profile edits photo, banner, name and company with a live preview and saves once',async({page})=>{
+ const state=await setup(page);await openProfile(page);
+ await expect(page.getByText('Guests see this on your booking pages.',{exact:true})).toBeVisible();
+ const card=page.locator('[data-profile-card]');await expect(card).toContainText('Ada Lind');await expect(card).toContainText('Intro call');await expect(card).toContainText('30 minutes · Google Meet');
+ await page.getByLabel('Name',{exact:true}).fill('Ada Morgan');await page.getByLabel('Company',{exact:true}).fill('Fernhill');
+ await expect(card.locator('.pf-card-name')).toHaveText('Ada Morgan');await expect(card.locator('.pf-card-company')).toHaveText('Fernhill');await expect(card.locator('.pf-card-avatar')).toHaveText('AM');
+ await crop(page,'Change photo','avatar');await crop(page,'Add banner','banner');
+ await expect(page.getByLabel('Name',{exact:true})).toHaveValue('Ada Morgan');await expect(card.locator('.pf-card-avatar img')).toBeVisible();await expect(card.locator('.pf-card-banner')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Remove photo',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Change banner',exact:true})).toBeVisible();expect(state.writes).toHaveLength(0);
+ await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
+ expect(state.writes).toHaveLength(1);expect(Object.keys(state.writes[0].patch.profile).sort()).toEqual(['avatarImage','bannerImage','company','name']);expect(state.profile).toMatchObject({name:'Ada Morgan',company:'Fernhill'});
+ await expect(page.locator('#account-trigger')).toContainText('Ada Morgan');await expect(page.locator('#account-trigger .host-avatar img')).toBeVisible();
+ await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/scheduling-profile-desktop.png`,fullPage:true});
 });
-test('cancelled crops do not change profile; removal requires save and unsaved changes can be kept',async({page})=>{
- const state=await setup(page);await page.locator('#account-trigger').click();await page.locator('[data-profile=account]').click();let profile=page.getByRole('dialog',{name:'Edit profile',exact:true});await crop(page,'avatarImage','avatar',{cancel:true});await page.keyboard.press('Escape');await expect(profile).toHaveCount(0);expect(state.writes).toHaveLength(0);
- await page.locator('#account-trigger').click();await page.locator('[data-profile=account]').click();await crop(page,'avatarImage','avatar');await page.keyboard.press('Escape');await expect(profile.getByRole('button',{name:'Discard changes',exact:true})).toBeVisible();await profile.getByRole('button',{name:'Keep editing',exact:true}).click();await expect(profile.getByRole('img',{name:'Profile picture',exact:true})).toBeVisible();await profile.getByRole('button',{name:'Save profile',exact:true}).click();
- await page.locator('#account-trigger').click();await page.locator('[data-profile=account]').click();await profile.locator('[data-remove=avatarImage]').click();expect(state.writes).toHaveLength(1);await profile.getByRole('button',{name:'Save profile',exact:true}).click();expect(state.writes).toHaveLength(2);expect(state.profile.avatarImage).toBeNull();
+
+test('cancelled crops change nothing; removal needs Save; leaving with unsaved edits asks first',async({page})=>{
+ const state=await setup(page);await openProfile(page);
+ await crop(page,'Change photo','avatar',{cancel:true});await expect(page.getByRole('button',{name:'Remove photo',exact:true})).toBeHidden();
+ await crop(page,'Change photo','avatar');await page.getByRole('button',{name:'Back',exact:true}).click();
+ const ask=page.getByRole('dialog',{name:'Unsaved changes',exact:true});await expect(ask).toBeVisible();await ask.getByRole('button',{name:'Keep editing',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();await expect(page.locator('.pf-avatar img')).toBeVisible();expect(state.writes).toHaveLength(0);
+ const save=async()=>{await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.getByRole('button',{name:'Save',exact:true})).toBeEnabled();await expect(page.locator('#host-status')).toHaveText('Saved');};
+ await save();expect(state.writes).toHaveLength(1);
+ await page.getByRole('button',{name:'Remove photo',exact:true}).click();await expect(page.getByRole('button',{name:'Change photo',exact:true})).toBeFocused();expect(state.writes).toHaveLength(1);
+ await save();expect(state.writes).toHaveLength(2);expect(state.writes[1].patch.profile).toEqual({avatarImage:null});expect(state.profile.avatarImage).toBeNull();
+ await page.getByLabel('Name',{exact:true}).fill(' ');await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.getByRole('alert')).toHaveText('Enter a name.');await expect(page.getByLabel('Name',{exact:true})).toBeFocused();expect(state.writes).toHaveLength(2);
 });
-test('profile errors retain the crop and mobile dialogs fit',async({page})=>{
- await page.setViewportSize({width:360,height:780});await setup(page);await expect(page.locator('#account-trigger')).toBeHidden();await page.getByRole('navigation',{name:'Sections'}).getByRole('button',{name:'More',exact:true}).click();await page.locator('[data-profile=account]').click();await crop(page,'bannerImage','banner');
- await page.route('**/api/live/settings',route=>route.request().method()==='POST'?route.fulfill({status:409,json:{error:'Settings changed. Reload before saving.',code:'settings_conflict'}}):route.fulfill({json:{revision:'Z'.repeat(43),profile:{name:'Ada Lind',avatarImage:null,bannerImage:null},accounts:[],meetingTypes:[]}}));const profile=page.getByRole('dialog',{name:'Edit profile',exact:true});await profile.getByRole('button',{name:'Save profile',exact:true}).click();await expect(profile.getByRole('alert')).toContainText('Settings changed');await expect(profile.getByRole('img',{name:'Banner image',exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/scheduling-profile-mobile.png`});await profile.getByRole('button',{name:'Discard changes and reload',exact:true}).click();await expect(profile.getByRole('img',{name:'Banner image',exact:true})).toHaveCount(0);await expect(profile.locator('[data-error]')).toHaveText('');
+
+test('a save conflict keeps the edits, and Profile fits a phone with ‹ Settings',async({page})=>{
+ await page.setViewportSize({width:360,height:780});await setup(page);await expect(page.locator('#account-trigger')).toBeHidden();
+ await page.getByRole('navigation',{name:'Sections'}).getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:/^Profile/}).click();await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();
+ await crop(page,'Add banner','banner');
+ await page.route('**/api/live/settings',route=>route.request().method()==='POST'?route.fulfill({status:409,json:{error:'Settings changed. Reload before saving.',code:'settings_conflict'}}):route.fulfill({json:{revision:'Z'.repeat(43),profile:{name:'Ada Lind',avatarImage:null,bannerImage:null},accounts:[],meetingTypes:[]}}));
+ await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Your profile changed elsewhere. Your edits are still here.');await expect(page.locator('.pf-banner img')).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/scheduling-profile-mobile.png`,fullPage:true});
+ await page.getByRole('button',{name:'Settings',exact:true}).first().click();await expect(page.getByRole('dialog',{name:'Unsaved changes',exact:true})).toBeVisible();
 });
 test('guest branding stays present through selecting a time and Back, in light and dark',async({page})=>{
  const image=kind=>'data:image/jpeg;base64,'+readFileSync(fixture(kind)).toString('base64');
@@ -43,28 +67,13 @@ test('guest branding stays present through selecting a time and Back, in light a
  }
 });
 
-test('profile opens alongside a dirty meeting and unsupported files leave it intact',async({page})=>{
- const state=await setup(page);await page.getByLabel('Meeting name',{exact:true}).fill('Keep this edit');await page.locator('#account-trigger').click();await page.locator('[data-profile=account]').click();
- await expect(page.getByRole('dialog',{name:'Unsaved changes',exact:true})).toHaveCount(0);const profile=page.getByRole('dialog',{name:'Edit profile',exact:true});await expect(profile).toBeVisible();
- await profile.locator('[data-upload=avatarImage]').setInputFiles({name:'image.svg',mimeType:'image/svg+xml',buffer:Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>')});await expect(profile.getByRole('alert')).toContainText('PNG, JPEG or WebP');await expect(page.getByRole('dialog',{name:/Crop /})).toHaveCount(0);expect(state.writes).toHaveLength(0);
- await page.keyboard.press('Escape');await expect(profile).toHaveCount(0);await expect(page.getByLabel('Meeting name',{exact:true})).toHaveValue('Keep this edit');
-});
-
-test('banner and photo save without the new meeting draft, which stays untouched',async({page})=>{
- const state=await setup(page,{allowMeetings:true});await page.locator('#back-to-links').click();await page.locator('#add-type').click();const form=page.locator('#meeting-form');await page.getByLabel('Meeting name',{exact:true}).fill('Unfinished meeting');await form.locator('.len-chip',{hasText:'45 min'}).click();await form.locator('.len-chip',{hasText:'30 min'}).click();await expect(form.locator('input[name=duration]')).toHaveValue('45');await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));await page.getByRole('radio',{name:'Sage',exact:true}).check();
- const draftKept=async()=>{await expect(page.getByRole('dialog',{name:'Unsaved changes'})).toHaveCount(0);await expect(page.locator('#editor-save-state')).toHaveText('Unsaved changes');await expect(page.getByLabel('Meeting name',{exact:true})).toHaveValue('Unfinished meeting');await expect(form.locator('input[name=duration]')).toHaveValue('45');await expect(page.getByRole('radio',{name:'Sage',exact:true})).toBeChecked();expect(state.writes.at(-1).patch.meetingTypes).toBeUndefined();};
- const look=page.getByRole('button',{name:'Name and picture ↗',exact:true});await look.click();const profile=page.getByRole('dialog',{name:'Edit profile',exact:true});await expect(page.getByRole('dialog',{name:'Unsaved changes'})).toHaveCount(0);await crop(page,'bannerImage','banner');await profile.getByRole('button',{name:'Save profile',exact:true}).click();await expect(profile).toHaveCount(0);await expect.poll(()=>state.profile.bannerImage).toMatch(/^data:image\/jpeg;base64,/);await expect(look).toBeFocused();await draftKept();
- await changePicture(page,'avatar');const cropDialog=page.getByRole('dialog',{name:/Crop /});await expect(cropDialog).toBeVisible();await expect(page.getByRole('dialog',{name:'Unsaved changes'})).toHaveCount(0);await cropDialog.getByRole('button',{name:'Use image',exact:true}).click();await expect.poll(()=>state.profile.avatarImage).toMatch(/^data:image\/jpeg;base64,/);await expect(page.getByRole('dialog',{name:/Save /})).toHaveCount(0);await expect(page.locator('#account-trigger')).toBeFocused();await draftKept();
- await expect(page.locator('.host-identity .host-avatar img')).toBeVisible();await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/profile-images-draft-final.png`,animations:'disabled'});expect(state.writes).toHaveLength(2);await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');expect(state.writes[2].patch.meetingTypes[1]).toMatchObject({title:'Unfinished meeting',duration:45,accent:'sage',slug:'unfinished-meeting'});
-});
-
-test('failed direct image saving keeps the crop for retry without losing meeting edits',async({page})=>{
- const state=await setup(page);let failed=false;await page.route('**/api/live/settings',route=>{if(route.request().method()==='POST'&&!failed){failed=true;return route.fulfill({status:503,json:{error:'Image save is temporarily unavailable.'}});}return route.fallback();});
- await page.getByLabel('Meeting name',{exact:true}).fill('Keep my draft');await changePicture(page,'avatar');await page.getByRole('dialog',{name:/Crop /}).getByRole('button',{name:'Use image',exact:true}).click();const saving=page.getByRole('dialog',{name:'Save profile picture',exact:true});await expect(saving.getByRole('status')).toContainText('temporarily unavailable');await saving.getByRole('button',{name:'Try again',exact:true}).click();await expect.poll(()=>state.profile.avatarImage).toMatch(/^data:image\/jpeg;base64,/);await expect(saving).toHaveCount(0);await expect(page.locator('#host-status')).toBeEmpty();await expect(page.locator('#editor-save-state')).toHaveText('Unsaved changes');await page.locator('#meeting-form').waitFor();await expect(page.getByLabel('Meeting name',{exact:true})).toHaveValue('Keep my draft');expect(state.writes).toHaveLength(1);
-});
-
-test('an image conflict does not authorize an old meeting draft to overwrite newer meeting settings',async({page})=>{
- const state=await setup(page,{allowMeetings:true});let conflicted=false;await page.route('**/api/live/settings',route=>{if(route.request().method()==='POST'&&!conflicted){conflicted=true;state.settings.meetingTypes[0].title='Changed elsewhere';state.settings.revision='Z'.repeat(43);return route.fulfill({status:409,json:{error:'Settings changed.',code:'settings_conflict'}});}return route.fallback();});
- await page.getByLabel('Meeting name',{exact:true}).fill('My pending edit');await changePicture(page,'avatar');await page.getByRole('dialog',{name:/Crop /}).getByRole('button',{name:'Use image',exact:true}).click();const saving=page.getByRole('dialog',{name:'Save profile picture',exact:true});await expect(saving.getByRole('status')).toHaveText('Settings changed. Try again.');await saving.getByRole('button',{name:'Try again',exact:true}).click();await expect.poll(()=>state.profile.avatarImage).toMatch(/^data:image\/jpeg;base64,/);await expect(saving).toHaveCount(0);
- await page.locator('#meeting-form').waitFor();await expect(page.getByLabel('Meeting name',{exact:true})).toHaveValue('My pending edit');await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toContainText('This link changed elsewhere. Review it before saving.');expect(state.writes).toHaveLength(1);expect(state.settings.meetingTypes[0].title).toBe('Changed elsewhere');await expect(page.getByRole('button',{name:'Review latest settings',exact:true})).toBeVisible();
+test('Name and picture in a dirty link asks before leaving, and unsupported files leave the profile intact',async({page})=>{
+ const state=await setup(page);await page.getByLabel('Meeting name',{exact:true}).fill('Keep this edit');
+ await page.locator('#meeting-form .le-rows').waitFor().then(()=>page.evaluate(()=>document.querySelectorAll('#meeting-form details.le-row').forEach(d=>d.open=true)));
+ await page.getByRole('button',{name:'Name and picture ↗',exact:true}).click();const ask=page.getByRole('dialog',{name:'Unsaved changes',exact:true});await expect(ask).toBeVisible();
+ await ask.getByRole('button',{name:'Keep editing',exact:true}).click();await expect(page.getByLabel('Meeting name',{exact:true})).toHaveValue('Keep this edit');
+ await page.getByRole('button',{name:'Name and picture ↗',exact:true}).click();await page.getByRole('dialog',{name:'Unsaved changes',exact:true}).getByRole('button',{name:'Discard changes',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();
+ const pickerPromise=page.waitForEvent('filechooser');await page.getByRole('button',{name:'Change photo',exact:true}).click();await (await pickerPromise).setFiles({name:'image.svg',mimeType:'image/svg+xml',buffer:Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>')});
+ await expect(page.getByRole('alert')).toContainText('PNG, JPEG or WebP');await expect(page.getByRole('dialog',{name:/Crop /})).toHaveCount(0);expect(state.writes).toHaveLength(0);
 });

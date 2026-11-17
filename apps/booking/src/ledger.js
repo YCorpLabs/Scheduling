@@ -569,8 +569,10 @@ export class BookingLedger {
   // tokens and existing read/settings device scopes confer no decision power.
   recordActivity(entry){
     const clip=(value,max)=>typeof value==='string'?value.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,max):'';
-    const actor=entry?.actor||{},target=entry?.target;
-    const body={id:crypto.randomUUID(),at:Date.now(),actor:{kind:clip(actor.kind,20)||'app',name:clip(actor.name,80)||'Connected app',...(actor.sessionId?{sessionId:clip(actor.sessionId,80)}:{}),...(actor.email?{email:clip(actor.email,254)}:{})},action:clip(entry?.action,60),summary:clip(entry?.summary,300),...(target?{target:{type:clip(target.type,20),id:clip(target.id,100)}}:{})};
+    const actor=entry?.actor||{},target=entry?.target,given=entry?.detail&&typeof entry.detail==='object'?entry.detail:{};
+    // Structured facts behind the summary (names and epoch times) so the Studio can show times in its own format.
+    const detail=Object.fromEntries([...['title','name','link'].map(key=>[key,clip(given[key],160)]),['decision',['approve','decline'].includes(given.decision)?given.decision:''],...['at','from','to'].map(key=>[key,Number.isSafeInteger(given[key])?given[key]:''])].filter(([,value])=>value!==''));
+    const body={id:crypto.randomUUID(),at:Date.now(),actor:{kind:clip(actor.kind,20)||'app',name:clip(actor.name,80)||'Connected app',...(actor.sessionId?{sessionId:clip(actor.sessionId,80)}:{}),...(actor.email?{email:clip(actor.email,254)}:{})},action:clip(entry?.action,60),summary:clip(entry?.summary,300),...(target?{target:{type:clip(target.type,20),id:clip(target.id,100)}}:{}),...(Object.keys(detail).length?{detail}:{})};
     if(!body.action||!body.summary)return {error:'Choose an activity to record.',status:400};
     this.sql.exec('INSERT INTO live_activity VALUES (?,?,?)',body.id,body.at,JSON.stringify(body));
     this.sql.exec('DELETE FROM live_activity WHERE at<?',Date.now()-90*86400000);

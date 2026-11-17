@@ -1,0 +1,186 @@
+/* Studio sidebar, account menu and Settings. One spacing scale: 4 8 12 16 24 32 48 64.
+   Sidebar: 240px wide, 12px padding, every row 32px with 12px inside, so labels, marks and
+   avatars start 24px from the edge. Settings rows: 40px tile, 16px gap, name over one muted
+   line, one control. Colours come from tokens.css (--ui-*), so dark mode follows. */
+
+/* ----- Sidebar ----- */
+.host-console{grid-template-columns:240px minmax(0,1fr);background:var(--surface)}
+.host-console .host-nav{position:sticky;top:0;height:100dvh;display:flex;flex-direction:column;gap:0;padding:12px;background:var(--surface);border-right:1px solid var(--ui-line);min-width:0}
+.host-console .host-nav .host-brand{display:block;margin:0;min-width:0}
+.host-console .host-nav .sb-row,.host-console .host-nav .workspace-trigger{display:flex;align-items:center;gap:8px;width:100%;height:32px;min-height:32px;margin:0;padding:6px 12px;border:0;border-radius:8px;background:none;box-shadow:none;color:var(--ui-ink-2);font:inherit;font-size:14px;line-height:20px;font-weight:400;text-align:left;text-decoration:none;cursor:pointer}
+.host-console .host-nav .sb-row:hover,.host-console .host-nav .workspace-trigger:hover,.host-console .host-nav .workspace-trigger[aria-expanded=true]{background:var(--ui-hover);color:var(--ui-ink)}
+.host-console .host-nav .sb-row[aria-current=page]{background:var(--ui-hover);color:var(--ui-ink);font-weight:550}
+.host-console .host-nav .sb-nav .sb-row>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.host-console .host-nav .sb-count{flex:none;font-size:12px;color:var(--ui-muted);font-variant-numeric:tabular-nums;font-weight:400}
+.host-console .host-nav .sb-nav{display:flex;flex-direction:column;gap:0;margin-top:16px;min-width:0;overflow:visible}
+.host-console .host-nav .sb-bottom{margin-top:auto;display:flex;flex-direction:column}
+.host-console .host-nav .sb-back{color:var(--ui-muted)}
+.host-console .host-nav .sb-back svg{flex:none}
+.host-console .host-nav .sb-brand{cursor:default;color:var(--ui-ink);font-weight:600}
+.host-console .host-nav .sb-brand .workspace-mark{flex:none}
+.host-console .host-nav .sb-brand strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.host-console .host-nav .sb-brand:hover{background:none}
+
+/* Team switcher: a plain row, a 20px mark, the name and a quiet chevron. */
+.host-console .host-nav .workspace-switch{position:relative}
+.host-console .host-nav .workspace-trigger{color:var(--ui-ink);font-weight:600}
+.host-console .host-nav .workspace-trigger .workspace-name{display:block;flex:1;min-width:0}
+.host-console .host-nav .workspace-trigger .workspace-name strong{display:block;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.host-console .host-nav .workspace-trigger>svg{margin-left:auto;color:var(--ui-faint)}
+.host-console .host-nav .workspace-mark{width:20px;height:20px;border-radius:5px;background:var(--ui-ink);color:var(--surface);box-shadow:none;font-size:11px;font-weight:700;overflow:hidden}
+.host-console .host-nav .workspace-mark.add{background:transparent;color:var(--ui-muted);box-shadow:inset 0 0 0 1px var(--ui-line);font-weight:400}
+
+/* Account row: 24px avatar, the person's name; the menu opens above it. */
+.host-console .host-nav .host-account.account-compact{display:block;margin:0;padding:0;border:0}
+.host-console .host-nav .account-trigger{display:flex!important;align-items:center;gap:8px;width:100%;max-width:none;min-height:40px;height:40px;padding:6px 12px!important;border:0;border-radius:8px;background:none;color:var(--ui-ink);text-align:left}
+.host-console .host-nav .account-trigger:hover,.host-console .host-nav .account-trigger[aria-expanded=true]{background:var(--ui-hover)}
+.host-console .host-nav .account-trigger .host-avatar{width:24px;height:24px;border:0;border-radius:50%;background:var(--ui-ink);color:var(--surface);font-size:10px;font-weight:650;letter-spacing:0;flex:none}
+.host-console .host-nav .account-trigger-name strong{font-size:14px;font-weight:550}
+.account-popover{padding:4px;gap:0;border:0;border-radius:12px;background:var(--surface);box-shadow:var(--ui-pop-shadow);color:var(--ui-ink)}
+.account-popover .account-who{padding:8px 12px;min-width:0}
+.account-popover .account-who strong{display:block;font-weight:600;font-size:14px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-popover .account-who span{display:block;font-size:13px;line-height:18px;color:var(--ui-muted);overflow-wrap:anywhere}
+.account-popover .account-menu-divider{height:1px;margin:4px 0;background:var(--ui-line)}
+.account-popover .account-menu-row,.account-popover>button{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:32px;padding:6px 12px;border-radius:8px;font-size:14px;line-height:20px;color:var(--ui-ink)}
+.account-popover>button{width:100%;border:0;background:none;text-align:left;font:inherit;font-size:14px;cursor:pointer}
+.account-popover>button:hover,.account-popover>button:focus-visible{background:var(--ui-hover)}
+.theme-choices{display:flex;gap:12px}
+.theme-choices button{border:0;background:none;padding:0;margin:0;font:inherit;font-size:13px;line-height:20px;color:var(--ui-faint);cursor:pointer;border-radius:4px}
+.theme-choices button:hover{color:var(--ui-ink-2)}
+.theme-choices button[aria-pressed=true]{color:var(--ui-ink);font-weight:550}
+
+/* ----- Page column ----- */
+@media(min-width:721px){.host-console .host-content.is-settings{max-width:none;margin:0;padding:48px 40px 72px}}
+@media(min-width:1100px){.host-console .host-content{margin:0;padding:64px 64px 96px}.host-console .host-content.is-settings{padding:64px 64px 96px}}
+.st-page{position:relative;max-width:640px;color:var(--ui-ink)}
+.host-console .st-page h1{margin:0;font-size:24px;line-height:32px;font-weight:650;letter-spacing:-.02em;color:var(--ui-ink)}
+.host-console .st-page h2{margin:0 0 8px;font-size:16px;line-height:24px;font-weight:650;letter-spacing:-.01em;color:var(--ui-ink)}
+.st-head{position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:32px}
+.st-lead{margin:-28px 0 32px;color:var(--ui-muted);font-size:14px;line-height:20px}
+/* "For Fernhill": 4px under the heading, with the page's lead line straight after it. */
+.st-for{margin:-28px 0 32px;color:var(--ui-muted);font-size:14px;line-height:20px}
+.st-for+.st-lead{margin-top:-32px}
+.st-page #host-status{margin:0}
+.st-page #host-status.has-message{margin:-8px 0 24px}
+.st-page>.setup-callout{margin:0 0 24px}
+.st-sec+.st-sec{margin-top:48px}
+.st-note{margin:0;color:var(--ui-muted);font-size:13px;line-height:18px}
+.st-note+.st-pill{margin-top:12px}
+.st-note.error,.st-line.error{color:var(--ui-red)}
+.st-after{margin-top:12px}
+.st-legal{display:flex;gap:16px;margin:48px 0 0;font-size:13px}
+.st-legal a{color:var(--ui-muted)}
+.st-phone-back,.st-crumb{display:none;align-items:center;gap:8px;margin:0 0 16px;padding:6px 0;border:0;background:none;color:var(--ui-muted);font:inherit;font-size:14px;line-height:20px;cursor:pointer}
+.st-crumb{display:inline-flex;gap:6px;margin:0 0 8px;padding:0;font-size:13px}
+.st-crumb svg{width:12px;height:12px}
+.st-phone-only{display:none}
+
+/* ----- Rows ----- */
+.st-rows{display:flex;flex-direction:column}
+.st-row{display:flex;align-items:center;gap:16px;width:100%;margin:0;padding:12px 0;border:0;background:none;color:inherit;font:inherit;text-align:left}
+.st-link{cursor:pointer;border-radius:12px}
+.st-tile{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:10px;overflow:hidden;background:var(--ui-tile);color:var(--ui-ink-2)}
+.st-tile svg{width:20px;height:20px;display:block}
+.st-tile.mark-claude svg{width:22px;height:22px}
+.st-tile-image{background:none}
+.st-tile-image img{width:40px;height:40px;display:block}
+.st-row .st-tile.integration-mark{width:40px;height:40px;border:0;border-radius:10px;background:var(--ui-tile)}
+.st-row .st-tile.integration-mark svg{width:20px;height:20px}
+.st-text{display:flex;flex-direction:column;flex:1;min-width:0}
+.st-text-button{margin:0;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.st-name{font-size:15px;line-height:20px;font-weight:500;color:var(--ui-ink);overflow-wrap:anywhere}
+.st-line{font-size:13px;line-height:18px;color:var(--ui-muted);overflow-wrap:anywhere}
+.st-line:empty{display:none}
+.st-chev{flex:none;color:var(--ui-faint)}
+.st-chev-button{display:grid;place-items:center;flex:none;width:32px;height:32px;margin:0 -8px 0 0;padding:0;border:0;border-radius:8px;background:none;color:var(--ui-faint);cursor:pointer}
+.st-chev-button:hover,.st-chev-button[aria-expanded=true]{background:var(--ui-hover);color:var(--ui-ink-2)}
+.st-control{display:flex;flex:none}
+
+/* Controls: a grey soft pill does something, a red soft pill is destructive, one black pill per page. */
+.st-pill{display:inline-flex;align-items:center;justify-content:center;flex:none;margin:0;padding:6px 14px;border:0;border-radius:999px;background:var(--ui-pill);color:var(--ui-ink);font:inherit;font-size:13px;line-height:20px;font-weight:550;white-space:nowrap;text-decoration:none;cursor:pointer}
+.st-pill:hover{filter:brightness(.97)}
+[data-theme=dark] .st-pill:hover{filter:brightness(1.15)}
+.st-pill.red{background:var(--ui-red-soft);color:var(--ui-red)}
+.st-pill.dark{background:var(--ui-ink);color:var(--surface)}
+.st-pill:disabled{opacity:.55;cursor:default}
+.st-text-button,.pf-buttons .st-text-button{font-size:13px;line-height:20px;color:var(--ui-ink-2)}
+
+/* Connected apps: the address an AI app needs, as steps in a popover or on the empty page. */
+.st-pop-anchor{position:static}
+.st-pop{position:absolute;z-index:20;top:calc(100% + 20px);right:0;width:360px;max-width:calc(100vw - 32px);padding:24px;border-radius:14px;background:var(--surface);box-shadow:var(--ui-pop-shadow)}
+.st-pop[hidden]{display:none}
+.host-console .st-pop h3{margin:0 0 16px;font-size:15px;line-height:20px;font-weight:600;color:var(--ui-ink)}
+.st-steps{display:grid;gap:16px;margin:0;padding:0;list-style:none;counter-reset:step}
+.st-steps li{display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:12px;counter-increment:step;font-size:13.5px;line-height:20px;color:var(--ui-ink-2)}
+.st-steps li::before{content:counter(step);display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--ui-pill);color:var(--ui-ink);font-size:11px;font-weight:600}
+.st-copy{grid-column:2;display:flex;align-items:center;gap:8px;min-height:40px;margin-top:8px;padding:0 4px 0 12px;border-radius:10px;background:var(--ui-field)}
+.st-copy code{flex:1;min-width:0;font:12.5px/18px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ui-ink);overflow-wrap:anywhere}
+.st-copy button{flex:none;margin:0;padding:6px 12px;border:0;border-radius:8px;background:var(--surface);box-shadow:0 0 0 1px var(--ui-line);color:var(--ui-ink);font:inherit;font-size:13px;line-height:20px;font-weight:500;cursor:pointer}
+.st-changes{display:flex;flex-direction:column}
+.st-change{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:12px 0;font-size:14px;line-height:20px}
+.st-change-what{min-width:0;margin:0;padding:0;border:0;background:none;color:var(--ui-ink);font:inherit;text-align:left;overflow-wrap:anywhere}
+button.st-change-what{cursor:pointer}
+button.st-change-what:hover{text-decoration:underline;text-underline-offset:3px}
+.st-change-when{flex:none;font-size:13px;color:var(--ui-muted);white-space:nowrap}
+.st-danger{margin-top:48px}
+
+/* Profile: fields on the left, what guests see on the right. */
+.pf-grid{display:grid;grid-template-columns:minmax(0,1fr) 232px;gap:32px;align-items:start}
+.pf-form{display:grid;gap:24px;max-width:440px;margin:0}
+.pf-photo{display:flex;align-items:center;gap:16px}
+.pf-buttons{display:flex;align-items:center;gap:12px}
+.pf-avatar{display:grid;place-items:center;flex:none;width:56px;height:56px;border-radius:50%;overflow:hidden;background:var(--ui-ink);color:var(--surface);font-size:18px;font-weight:650}
+.pf-avatar img,.pf-card-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.pf-banner{display:block;flex:none;width:120px;height:40px;border-radius:8px;overflow:hidden;background:var(--ui-field)}
+.pf-banner img{width:100%;height:100%;object-fit:cover;display:block}
+.host-console .pf-field label,.host-console .pf-label{display:block;margin:0 0 6px;font-size:13px;line-height:18px;font-weight:400;letter-spacing:0;color:var(--ui-muted)}
+.host-console .pf-field input{display:block;width:100%;min-height:40px;margin:0;padding:10px 12px;border:0;border-radius:10px;background:var(--ui-field);color:var(--ui-ink);font:inherit;font-size:14px;line-height:20px;box-shadow:none}
+.host-console .pf-field input:focus-visible{outline:2px solid var(--ui-muted);outline-offset:1px}
+.host-console .pf-field input[aria-invalid=true]{box-shadow:inset 0 0 0 1px var(--ui-red)}
+.pf-error{margin:0;color:var(--ui-red);font-size:13px;line-height:18px}
+.pf-error:empty{display:none}
+.pf-cap{margin:0 0 8px;font-size:12px;line-height:16px;color:var(--ui-muted)}
+.pf-card{display:flex;flex-direction:column;align-items:flex-start;padding:24px 16px;border-radius:12px;background:var(--surface);box-shadow:0 0 0 1px var(--ui-line);overflow:hidden}
+.pf-card-banner{display:block;width:calc(100% + 32px);aspect-ratio:3/1;margin:-24px -16px 16px;object-fit:cover}
+.pf-card-avatar{display:grid;place-items:center;width:32px;height:32px;margin-bottom:12px;border-radius:50%;overflow:hidden;background:var(--ui-tile);box-shadow:0 0 0 1px var(--ui-line);color:var(--ui-ink);font-size:11px;font-weight:650}
+.pf-card-name{font-size:12.5px;line-height:17px;color:var(--ui-ink-2);overflow-wrap:anywhere}
+.pf-card-company{font-size:12px;line-height:17px;color:var(--ui-muted);overflow-wrap:anywhere}
+.pf-card-title{margin:12px 0 8px;font-size:16px;line-height:22px;font-weight:600;letter-spacing:-.01em;color:var(--ui-ink);overflow-wrap:anywhere}
+.pf-card-meta{font-size:12px;line-height:16px;color:var(--ui-muted)}
+
+/* Bookings attention banner: Troubleshooting opens from here. */
+.booking-attention-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;flex:none}
+
+/* Notifications keeps its delivery log and notices under the rows. */
+.st-page .integrations-page{gap:24px}
+.st-page .integration-log>summary .link-button{font-weight:550}
+
+/* Phone list */
+.st-list{display:flex;flex-direction:column}
+.st-list-row{display:flex;align-items:center;gap:12px;width:100%;margin:0;padding:12px 0;border:0;background:none;color:var(--ui-ink);font:inherit;text-align:left;cursor:pointer}
+.st-list-row .st-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.host-console .st-page button:focus-visible,.host-console .st-page a:focus-visible,.host-console .host-nav button:focus-visible{outline:2px solid var(--ui-muted);outline-offset:2px}
+
+/* ----- Phone ----- */
+@media(max-width:720px){
+  .host-console .host-nav{position:static;height:auto;padding:12px 4px 0;border:0;background:none}
+  .host-console .host-nav .sb-nav,.host-console .host-nav .sb-bottom,.host-console .host-nav .sb-back{display:none}
+  .host-console.in-settings .host-nav{display:none}
+  .host-console .host-nav .host-brand{display:block}
+  .host-console .host-content.is-settings{padding:16px 24px 96px}
+  .st-phone-back{display:inline-flex}
+  .st-crumb{font-size:14px;margin:0 0 16px;gap:8px}
+  .st-crumb svg{width:16px;height:16px}
+  .st-phone-only{display:block}
+  .pf-grid{grid-template-columns:minmax(0,1fr)}
+  .pf-preview{order:-1}
+  .st-pop{position:fixed;top:auto;bottom:88px;left:16px;right:16px;width:auto}
+  /* 32px to look at, 44px to tap. */
+  .st-pill{position:relative}
+  .st-pill::after{content:"";position:absolute;inset:-6px -2px}
+  .tabbar{display:flex!important;justify-content:space-around;padding:12px 16px calc(28px + env(safe-area-inset-bottom))!important;border-top:1px solid var(--ui-line)!important;background:var(--surface)!important}
+  .tabbar button{flex:1;display:block!important;padding:0!important;font-size:13px!important;line-height:20px;font-weight:400!important;color:var(--ui-muted)!important;text-align:center}
+  .tabbar button[aria-current=page]{color:var(--ui-ink)!important;font-weight:600!important}
+  .tabbar em{top:-6px!important;left:calc(50% + 24px)!important}
+}

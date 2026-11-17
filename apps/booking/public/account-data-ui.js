@@ -1,5 +1,4 @@
-import {showAccountDeletion} from './account-deletion-ui.js';
-import {esc,createDialog,dialogHead,WORKSPACE_HEADER} from './workspace-ui.js';
+import {esc,WORKSPACE_HEADER} from './workspace-ui.js';
 // Account and profile data export. The browser reads bounded pages serially and builds the
 // file locally; no artifact is stored server-side or in browser storage, and export contents are
 // never logged. A partial export is never offered for download.
@@ -136,18 +135,3 @@ export function bindExportRow(row,controller,options){
 }
 
 export const profileExportMarkup=workspace=>canExportProfile(workspace)?`<section class="team-block profile-data" aria-labelledby="profile-data-title"><div class="team-block-head"><h2 id="profile-data-title">${esc(workspace.name)}</h2></div><div class="account-data-row" data-profile-export></div></section>`:'';
-
-/** Manage account: identity, signed-in browsers and account export. */
-export function showManageAccount({email,accountId,trigger,onSessions,onDeletionCommitted,fetchImpl}){
- const {dialog}=createDialog({label:'Account',className:'booking-dialog account-manage-dialog',trigger});
- dialog.innerHTML=`${dialogHead('Account','Close account')}<div class="booking-detail-body account-manage"><p class="account-manage-email"><strong>${esc(email)}</strong></p><div class="account-data-row"><div class="account-data-label"><span>Signed-in browsers</span></div><div class="account-data-actions"><button type="button" class="secondary compact-button" data-manage-sessions aria-label="Manage signed-in browsers">Manage</button></div></div><div class="account-data-row" data-account-export></div><div class="account-delete-entry"><button type="button" class="danger-quiet" data-delete-account>Delete account…</button></div></div>`;
- const row=dialog.querySelector('[data-account-export]');let draw=()=>{};
- const controller=createExportController({scope:'account',request:exportRequest({scope:'account',expectedAccountId:accountId,fetchImpl}),isCurrent:()=>dialog.isConnected,onUpdate:state=>draw(state)});
- draw=bindExportRow(row,controller,{label:'Your data',actionLabel:'Export your data'});
- dialog.addEventListener('close',()=>controller.dispose());
- dialog.querySelector('[data-close]').onclick=()=>dialog.close();
- const sessions=dialog.querySelector('[data-manage-sessions]');sessions.onclick=()=>onSessions?.(sessions);
- const deletion=dialog.querySelector('[data-delete-account]');deletion.onclick=()=>{controller.cancel();showAccountDeletion({email,accountId,trigger:deletion,fetchImpl,onCommitted:onDeletionCommitted,onExport:()=>{controller.start();row.querySelector('button,a')?.focus();}});};
- dialog.showModal();sessions.focus();
- return {dialog,controller};
-}

@@ -36,6 +36,14 @@ test('inventory exposes safe opaque IDs and timestamps for only the authenticate
   assert.equal(await session(request(data.sessions[0].id),env),null,'inventory IDs cannot authenticate as cookies');
   assert.equal((await browserSessions(request(),env)).status,401);
 });
+test('a browser signed in with a known User-Agent is listed by a coarse name, never the raw string',async()=>{
+  const {env,request,add}=setup(),current=await add(),phone=randomToken();
+  await storeBrowserSession(env,phone,{hostId:'host-a',email:'owner@example.com'},{name:'Safari on iPhone',mobile:true});
+  const data=await (await browserSessions(request(current),env)).json(),listed=data.sessions.find(s=>!s.current);
+  assert.equal(listed.device,'Safari on iPhone');assert.equal(listed.mobile,true);
+  assert.deepEqual(Object.keys(listed).sort(),['createdAt','current','device','expiresAt','id','label','lastSeenAt','mobile']);
+  assert.equal(data.sessions.find(s=>s.current).device,undefined);
+});
 test('legacy cookies enroll lazily without extending expiry and cannot resurrect after revocation',async()=>{
   const {env,records,request,add,legacy}=setup({failCleanup:true}),owner=await add(),old=await legacy();
   const key='session:'+await sha256(old),originalExpiry=records.get(key).expiresAt;
