@@ -71,3 +71,7 @@ test('the command writes a private merged config inside the app and refuses bad 
     assert.equal(outside.status,1);assert.equal(existsSync(join(dir,'x.json')),false);
   }finally{rmSync(dir,{recursive:true,force:true});rmSync(out,{force:true});}
 });
+test('the Worker, not static assets, answers every API, auth, device, MCP and OAuth route',()=>{
+  const first=base.assets.run_worker_first,routes=['/api/*','/auth/*','/device','/device-ui.js','/mcp','/oauth/*','/.well-known/*'];
+  for(const route of routes)assert.ok(first.includes(route),route+' must run the Worker first; assets would answer it with the Studio page');
+});

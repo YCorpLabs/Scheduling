@@ -23,7 +23,10 @@
       "/api/*",
       "/auth/*",
       "/device",
-      "/device-ui.js"
+      "/device-ui.js",
+      "/mcp",
+      "/oauth/*",
+      "/.well-known/*"
     ]
   },
   "durable_objects": {
