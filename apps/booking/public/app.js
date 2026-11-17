@@ -32,7 +32,8 @@ const publicRoute=location.pathname.match(/^\/b\/(h_[A-Za-z0-9_-]{24})\/([a-z0-9
 const managementRoute=location.pathname.match(/^\/manage\/(h_[A-Za-z0-9_-]{24})\/([-a-zA-Z0-9_]{16,80})$/);
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(ms,options)=>new Intl.DateTimeFormat('en-GB',{timeZone:zone,...options}).format(ms);
-const time=ms=>fmt(ms,{hour:'numeric',minute:'2-digit',hour12});
+// 24-hour times have two-digit hours (09:30), as in Studio and emails; 12-hour times don't (9:30 am).
+const time=ms=>fmt(ms,hour12?{hour:'numeric',minute:'2-digit',hour12:true}:{hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 const shortDate=ms=>fmt(ms,{weekday:'short',day:'numeric',month:'short'});
 const longDate=ms=>fmt(ms,{weekday:'long',day:'numeric',month:'long'});
 // GMT offset of a zone at a given instant, e.g. "GMT+1". Cached per zone and instant; some clock changes occur within a UTC hour.
