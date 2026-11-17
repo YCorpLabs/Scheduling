@@ -54,3 +54,19 @@ test('the device page names only the configured desktop client and brand',async(
  await mockDevice(page,{vars:{BRAND_NAME:'Acme',DESKTOP_APP_NAME:'Acme Mail'}});await page.goto(base+'/device#code=ABCD-EFGH-JKLM');await expect(page).toHaveTitle('Connect Acme Mail');await expect(page.locator('.brand')).toHaveText('a.Acme');await expect(page.getByRole('heading',{name:'Connect Acme Mail'})).toBeVisible();await expect(page.getByText('Only continue if you started this in your Acme Mail app.')).toBeVisible();
  await page.getByRole('button',{name:'Approve connection'}).click();await expect(page.getByText(/Return to Acme Mail to continue/)).toBeVisible();await expect(page).toHaveTitle('Connected · Acme');
 });
+test('a booking:read request lists only booking access, and approves exactly that scope',async({page})=>{
+ const state=await mockDevice(page,{scope:'booking:read',vars:{DESKTOP_APP_NAME:'Email'}});await page.goto(base+'/device#code=ABCD-EFGH-JKLM');
+ await expect(page.locator('#access-summary')).toHaveText('Use your meeting links in Email.');
+ await page.getByText('What you’re allowing',{exact:true}).click();
+ await expect(page.getByText('Read your meeting links, bookings, and aggregate analytics.')).toBeVisible();
+ await expect(page.getByText('Create email-open tracking only when you turn it on for a message.')).toBeHidden();
+ await expect(page.getByText('Create, edit, publish, or remove meeting types and update your scheduling profile.')).toBeHidden();
+ await page.getByRole('button',{name:'Approve connection'}).click();await expect(page.getByRole('heading',{name:'You’re connected'})).toBeVisible();expect(state.approvals[0].approvedScope).toBe('booking:read');
+});
+test('the default desktop scope still lists optional email activity',async({page})=>{
+ const state=await mockDevice(page,{vars:{DESKTOP_APP_NAME:'Email'}});await page.goto(base+'/device#code=ABCD-EFGH-JKLM');
+ await expect(page.locator('#access-summary')).toHaveText('Use your meeting links and optional email activity in Email.');
+ await page.getByText('What you’re allowing',{exact:true}).click();
+ await expect(page.getByText('Create email-open tracking only when you turn it on for a message.')).toBeVisible();
+ await page.getByRole('button',{name:'Approve connection'}).click();await expect(page.getByRole('heading',{name:'You’re connected'})).toBeVisible();expect(state.approvals[0].approvedScope).toBe('booking:read email:tracking');
+});

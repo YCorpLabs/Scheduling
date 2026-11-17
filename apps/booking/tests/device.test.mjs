@@ -83,3 +83,41 @@ test('settings write access is a separate explicit browser approval and old gran
 test('unsupported permission requests cannot create a settings grant',async()=>{
  const {call}=setup();for(const options of [{settingsWrite:'true'},{scope:'booking:settings'},{scopes:['booking:settings']}])assert.equal((await call('/api/device/start',{name:'Client',codeChallenge:await sha256(randomToken()),...options})).status,400);
 });
+test('a desktop client can ask for booking:read only; the browser approves exactly that and the bearer carries no tracking',async()=>{
+ const {env,call,exchange}=setup(),verifier=randomToken();
+ // Released Email builds always send settingsWrite; a requested scope must agree with it.
+ const start=await call('/api/device/start',{name:'Email on my Mac',codeChallenge:await sha256(verifier),scope:'booking:read',settingsWrite:false});assert.equal(start.status,200);const link={...await start.json(),verifier};
+ const inspected=await(await call('/api/device/inspect',{userCode:link.userCode},{cookie:'owner'})).json();assert.equal(inspected.scope,'booking:read');
+ assert.equal((await call('/api/device/approve',{userCode:link.userCode,approve:true,approvedScope:'booking:read email:tracking'},{cookie:'owner'})).status,400,'approving more than was requested is refused');
+ assert.equal((await call('/api/device/approve',{userCode:link.userCode,approve:true,accountEmail:inspected.accountEmail,approvedScope:'booking:read'},{cookie:'owner'})).status,204);
+ const credential=await(await exchange(link)).json();assert.equal(credential.scope,'booking:read');
+ const device=await authenticateDevice(new Request(ORIGIN,{headers:{Authorization:'Bearer '+credential.accessToken}}),env);assert.equal(device.scope,'booking:read');assert.ok(!device.scope.split(' ').includes('email:tracking'));
+ const sessions=await(await call('/api/device/sessions',undefined,{cookie:'owner'})).json();assert.equal(sessions.sessions[0].scope,'booking:read');
+});
+test('requested desktop scopes accept the current combinations and nothing else',async()=>{
+ const {call,approve,exchange,limits}=setup();
+ // Each case is a separate start; the per-minute start limit is not under test here.
+ const start=async body=>{limits.clear();const verifier=randomToken(),r=await call('/api/device/start',{name:'Client',codeChallenge:await sha256(verifier),...body});return {status:r.status,link:r.status===200?{...await r.json(),verifier}:null,error:r.status===200?null:(await r.json()).error};};
+ const scopeOf=async link=>(await(await call('/api/device/inspect',{userCode:link.userCode},{cookie:'owner'})).json()).scope;
+ for(const [body,scope] of [[{},'booking:read email:tracking'],[{settingsWrite:false},'booking:read email:tracking'],[{settingsWrite:true},'booking:read email:tracking booking:settings'],[{scope:'booking:read'},'booking:read'],[{scope:'booking:read email:tracking'},'booking:read email:tracking'],[{scope:'booking:read email:tracking',settingsWrite:false},'booking:read email:tracking'],[{scope:'booking:read email:tracking booking:settings'},'booking:read email:tracking booking:settings'],[{scope:'booking:read email:tracking booking:settings',settingsWrite:true},'booking:read email:tracking booking:settings']]){
+  const result=await start(body);assert.equal(result.status,200,JSON.stringify(body));assert.equal(await scopeOf(result.link),scope,JSON.stringify(body));
+ }
+ const rejected=[{scope:'email:tracking'},{scope:'booking:settings'},{scope:'booking:read booking:settings'},{scope:'booking:read booking:settings booking:manage'},{scope:'booking:manage'},{scope:'email:tracking booking:read'},{scope:' booking:read'},{scope:'booking:read '},{scope:'booking:read  email:tracking'},{scope:''},{scope:null},{scope:['booking:read']},{scopes:['booking:read']},{scope:'booking:read',settingsWrite:true},{scope:'booking:read email:tracking booking:settings',settingsWrite:false},{scope:'booking:read',settingsWrite:'false'}];
+ for(const body of rejected){const result=await start(body);assert.equal(result.status,400,JSON.stringify(body));assert.ok(result.error,JSON.stringify(body));}
+ // A requested settings scope still needs the same explicit, reviewed browser approval as settingsWrite.
+ const settings=(await start({scope:'booking:read email:tracking booking:settings'})).link;assert.equal((await approve(settings)).status,400);
+ const read=(await start({scope:'booking:read'})).link;assert.equal((await approve(read)).status,204,'read-only needs no extra review fields');assert.equal((await(await exchange(read)).json()).scope,'booking:read');
+});
+test('pending grants stored before requested scopes keep the default scope',async()=>{
+ const {records,call,approve,exchange}=setup(),link=await (async()=>{const verifier=randomToken(),r=await call('/api/device/start',{name:'Older grant',codeChallenge:await sha256(verifier)});return {...await r.json(),verifier};})();
+ const row=[...records.values()].find(r=>r.body.challenge);delete row.body.scope;
+ assert.equal((await(await call('/api/device/inspect',{userCode:link.userCode},{cookie:'owner'})).json()).scope,'booking:read email:tracking');
+ assert.equal((await approve(link)).status,204);assert.equal((await(await exchange(link)).json()).scope,'booking:read email:tracking');
+});
+test('the approval page lists email-open tracking only when it was requested',async()=>{
+ const {call}=setup(),html=await(await call('/device')).text(),script=await(await call('/device-ui.js')).text();
+ assert.match(html,/<li id="tracking-permission" hidden>Create email-open tracking only when you turn it on for a message\.<\/li>/);
+ assert.match(html,/<li id="settings-permission" hidden>/);
+ assert.ok(!html.includes('optional email activity'),'the page starts without tracking and adds it from the reviewed scope');
+ assert.ok(script.includes("byId('tracking-permission').hidden=!tracking"));
+});
