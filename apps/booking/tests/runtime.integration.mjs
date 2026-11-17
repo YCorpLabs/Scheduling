@@ -136,6 +136,22 @@ test('hosted Worker authenticates OAuth, isolates administration and completes a
     assert.equal((await call('/api/device/approve',{cookie,body:{userCode:setupStart.userCode,approve:true,accountEmail:setupReview.accountEmail,approvedScope:settingsScope}})).status,204);
     const setupToken=await(await call('/api/device/token',{body:{deviceCode:setupStart.deviceCode,codeVerifier:settingsVerifier}})).json(),setupBearer={Authorization:'Bearer '+setupToken.accessToken};assert.equal(setupToken.scope,settingsScope);
     assert.equal((await call('/api/device/calendars',{headers:setupBearer})).status,200);
+    // A client may ask for booking:read only (Email sends settingsWrite as well); that bearer reads bookings but cannot track opens.
+    const readVerifier='r'.repeat(64),readStart=await(await call('/api/device/start',{body:{name:'Read-only client',codeChallenge:await sha256(readVerifier),scope:'booking:read',settingsWrite:false}})).json();
+    const readReview=await(await call('/api/device/inspect',{cookie,body:{userCode:readStart.userCode}})).json();assert.equal(readReview.scope,'booking:read');
+    assert.equal((await call('/api/device/approve',{cookie,body:{userCode:readStart.userCode,approve:true,accountEmail:readReview.accountEmail,approvedScope:'booking:read'}})).status,204);
+    const readToken=await(await call('/api/device/token',{body:{deviceCode:readStart.deviceCode,codeVerifier:readVerifier}})).json(),readBearer={Authorization:'Bearer '+readToken.accessToken};assert.equal(readToken.scope,'booking:read');
+    assert.equal((await call('/api/device/bookings',{headers:readBearer})).status,200);
+    assert.equal((await call('/api/device/tracking',{headers:readBearer,body:{id:crypto.randomUUID()}})).status,401);
+    assert.equal((await call('/api/device/calendars',{headers:readBearer})).status,403);
+    assert.equal((await call('/api/device/start',{body:{name:'Agent scope',codeChallenge:await sha256(readVerifier),scope:'booking:read booking:settings booking:manage'}})).status,400);
+    // Settings access without tracking, as Email asks for it with settingsWrite.
+    const editVerifier='e'.repeat(64),editScope='booking:read booking:settings',editStart=await(await call('/api/device/start',{body:{name:'Settings client',codeChallenge:await sha256(editVerifier),scope:editScope,settingsWrite:true}})).json();
+    const editReview=await(await call('/api/device/inspect',{cookie,body:{userCode:editStart.userCode}})).json();assert.equal(editReview.scope,editScope);
+    assert.equal((await call('/api/device/approve',{cookie,body:{userCode:editStart.userCode,approve:true,accountEmail:editReview.accountEmail,approvedScope:editScope}})).status,204);
+    const editToken=await(await call('/api/device/token',{body:{deviceCode:editStart.deviceCode,codeVerifier:editVerifier}})).json(),editBearer={Authorization:'Bearer '+editToken.accessToken};assert.equal(editToken.scope,editScope);
+    assert.equal((await call('/api/device/calendars',{headers:editBearer})).status,200);
+    assert.equal((await call('/api/device/tracking',{headers:editBearer,body:{id:crypto.randomUUID()}})).status,401);
     const apply=await call('/api/device/settings',{headers:setupBearer,body:{patch:preview.patch,expectedRevision:preview.revision}});assert.equal(apply.status,200,await apply.clone().text());const applied=await apply.json();assert.equal(applied.settings.profile.company,'Preview only');assert.notEqual(applied.revision,preview.revision);
     const staleBrowser=await saveBrowser(cookie,{profile:{company:'Stale browser edit'}},desktopSettings.revision);assert.equal(staleBrowser.status,409);assert.equal((await staleBrowser.json()).code,'settings_conflict');assert.equal((await(await call('/api/live/settings',{cookie})).json()).profile.company,'Preview only');
     const browserAppliedResponse=await saveBrowser(cookie,{profile:{company:'Browser current'}},applied.revision);assert.equal(browserAppliedResponse.status,200);const browserApplied=await browserAppliedResponse.json();assert.equal(browserApplied.settings.profile.email,'owner-1@example.com');assert.equal(browserApplied.settings.profile.id,host);assert.notEqual(browserApplied.revision,applied.revision);

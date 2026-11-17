@@ -7,7 +7,8 @@ import {esc,copyText,confirmAction} from './workspace-ui.js';
 const DAY=86400000;
 const SCOPES={
   'booking:read booking:settings booking:manage':{write:true,can:'Can change your links, hours and bookings.'},
-  'booking:read email:tracking booking:settings':{write:true,can:'Can change your links and hours.'}
+  'booking:read email:tracking booking:settings':{write:true,can:'Can change your links and hours.'},
+  'booking:read booking:settings':{write:true,can:'Can change your links and hours.'}
 };
 export const canChange=scope=>!!SCOPES[scope]?.write;
 export const accessLine=scope=>canChange(scope)?'Can make changes':'Read only';
