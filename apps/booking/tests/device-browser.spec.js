@@ -70,3 +70,11 @@ test('the default desktop scope still lists optional email activity',async({page
  await expect(page.getByText('Create email-open tracking only when you turn it on for a message.')).toBeVisible();
  await page.getByRole('button',{name:'Approve connection'}).click();await expect(page.getByRole('heading',{name:'You’re connected'})).toBeVisible();expect(state.approvals[0].approvedScope).toBe('booking:read email:tracking');
 });
+test('a booking:read booking:settings request lists settings access without email activity',async({page})=>{
+ const scope='booking:read booking:settings',state=await mockDevice(page,{scope,vars:{DESKTOP_APP_NAME:'Email'}});await page.goto(base+'/device#code=ABCD-EFGH-JKLM');
+ await expect(page.getByText('Allow this device to manage your meeting settings, links, and scheduling profile.')).toBeVisible();
+ await page.getByText('What you’re allowing',{exact:true}).click();
+ await expect(page.getByText('Create, edit, publish, or remove meeting types and update your scheduling profile.')).toBeVisible();
+ await expect(page.getByText('Create email-open tracking only when you turn it on for a message.')).toBeHidden();
+ await page.getByRole('button',{name:'Approve settings access'}).click();await expect(page.getByRole('heading',{name:'You’re connected'})).toBeVisible();expect(state.approvals[0]).toMatchObject({approvedScope:scope,accountEmail:'me@example.com'});
+});

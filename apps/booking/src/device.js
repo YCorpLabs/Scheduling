@@ -6,12 +6,13 @@ import {brandFromEnv,brandLabel,brandMark,escapeHTML} from '../public/brand.js';
 
 const GRANT_MS=10*60_000,TOKEN_MS=30*86_400_000,POLL_MS=5_000,SCOPE='booking:read email:tracking';
 const SETTINGS_SCOPE=SCOPE+' booking:settings';
-// What a desktop client may ask for when it starts a grant, as one exact space-separated string.
-// Without a requested scope it gets SCOPE, or SETTINGS_SCOPE with settingsWrite, as released Email builds expect.
-const DESKTOP_SCOPES=['booking:read',SCOPE,SETTINGS_SCOPE];
+// What a desktop client may ask for when it starts a grant, as one exact space-separated string:
+// a connection, or a connection that can also change settings (Email's contracts/scheduling.json).
+// Without a requested scope it gets SCOPE, or SETTINGS_SCOPE with settingsWrite, as earlier Email builds expect.
+const READ_SCOPE='booking:read',READ_SETTINGS_SCOPE='booking:read booking:settings',DESKTOP_SCOPES=[READ_SCOPE,READ_SETTINGS_SCOPE];
 // MCP clients connected through OAuth: read, change settings and act on bookings and integrations.
 export const AGENT_SCOPE='booking:read booking:settings booking:manage';
-const validScopes=new Set(['booking:read',SCOPE,SETTINGS_SCOPE,AGENT_SCOPE]);
+const validScopes=new Set([READ_SCOPE,READ_SETTINGS_SCOPE,SCOPE,SETTINGS_SCOPE,AGENT_SCOPE]);
 const writesSettings=scope=>scope.split(' ').includes('booking:settings');
 const grantScope=grant=>grant.scope??SCOPE;
 const USER_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

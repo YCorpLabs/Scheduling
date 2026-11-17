@@ -46,23 +46,34 @@ Each host's Durable Object owns all meeting types and connected-account conflict
 
 The Email desktop app connects with a revocable PKCE device grant:
 
-1. `POST /api/device/start` with `name`, `codeChallenge` (base64url SHA-256 of the verifier) and, optionally, `settingsWrite` (boolean) and `scope` (string). It returns `deviceCode`, `userCode`, `verificationUrl`, `expiresIn` and `interval`.
+1. `POST /api/device/start` with `name`, `codeChallenge` (base64url SHA-256 of the verifier), `settingsWrite` (boolean, optional) and `scope` (string, optional). It returns `deviceCode`, `userCode`, `verificationUrl`, `expiresIn` and `interval`.
 2. The person opens `verificationUrl`, signs in and approves. The page lists only the permissions in the requested scope.
-3. `POST /api/device/token` with `deviceCode` and `codeVerifier` returns `accessToken`, `tokenType`, `expiresAt` and `scope`, which is the requested scope.
+3. `POST /api/device/token` with `deviceCode` and `codeVerifier` returns `accessToken`, `tokenType`, `expiresAt` and `scope`, which is exactly the requested scope.
 
 | Request | Issued scope |
 | --- | --- |
-| no `scope` (`settingsWrite` absent or `false`) | `booking:read email:tracking` |
-| no `scope`, `settingsWrite: true` | `booking:read email:tracking booking:settings` |
 | `scope: "booking:read"` | `booking:read` |
-| `scope: "booking:read email:tracking"` | `booking:read email:tracking` |
-| `scope: "booking:read email:tracking booking:settings"` | `booking:read email:tracking booking:settings` |
+| `scope: "booking:read booking:settings"`, `settingsWrite: true` | `booking:read booking:settings` |
+| no `scope` (earlier Email builds) | `booking:read email:tracking` |
+| no `scope`, `settingsWrite: true` | `booking:read email:tracking booking:settings` |
 
-- `scope` must be exactly one of these strings, in this order with single spaces. Anything else, including `booking:manage` (MCP only) and a `scopes` array, returns 400.
+- `scope` must be one of the two strings above, exactly. Anything else returns 400, including the tracking scopes, `booking:manage` (MCP only) and a `scopes` array.
 - When both are sent, `settingsWrite` must say whether `scope` contains `booking:settings`; otherwise 400.
-- A grant with `booking:settings` still needs the browser to send back the reviewed `approvedScope` and account email.
-- `/api/device/tracking` requires `email:tracking`; a `booking:read` bearer gets 401 there. `/api/device/calendars` and settings writes require `booking:settings`.
-- Requests without `scope` behave as before, and credentials or pending grants created before `scope` was accepted keep their scope.
+- A grant with `booking:settings` needs the browser to send back the reviewed `approvedScope` and account email.
+- `/api/device/tracking` requires `email:tracking`, so the requested scopes get 401 there. `/api/device/calendars` and settings writes require `booking:settings`.
+- Credentials and pending grants with the earlier scopes stay valid.
+
+Email records the same contract in its `contracts/scheduling.json`:
+
+```json
+"desktop_scopes": {
+  "request_field": "scope",
+  "connection": "booking:read",
+  "settings": "booking:read booking:settings",
+  "issued": "exactly the requested scope",
+  "earlier_grants": ["booking:read email:tracking", "booking:read email:tracking booking:settings"]
+}
+```
 
 ## Notifications
 

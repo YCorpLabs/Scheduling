@@ -47,7 +47,7 @@ test('connected apps: Email desktop sessions and AI apps get their own name, ico
   assert.equal(appView({id:'c9',kind:'mcp',name:'Claude',scope:'booking:read'},{activity:[{at:NOW,summary:'x',actor:{name:'Claude'}}],now:NOW}).line,'Read only · 1 this week');
   assert.equal(appView({id:'c1',kind:'mcp',name:'Claude',scope:'booking:read'}).changes,null);
   assert.deepEqual(['Claude','claude.ai','ChatGPT','OpenAI Codex','Cursor','Zed','MCP client'].map(clientMark),['claude','claude','openai','openai','cursor','','']);
-  assert.equal(accessLine('booking:read email:tracking booking:settings'),'Can make changes');assert.equal(capability('booking:read email:tracking'),'Can see your links and bookings.');
+  assert.equal(accessLine('booking:read email:tracking booking:settings'),'Can make changes');assert.equal(accessLine('booking:read booking:settings'),'Can make changes');assert.equal(capability('booking:read booking:settings'),'Can change your links and hours.');assert.equal(accessLine('booking:read'),'Read only');assert.equal(capability('booking:read email:tracking'),'Can see your links and bookings.');
   const page=appsPageMarkup({apps:[{id:'d1',name:"Email on Alex's MacBook Pro",scope:'booking:read'},{id:'z1',kind:'mcp',name:'Zed',scope:'booking:read'}],activity:[]},{origin:'https://meet.example',head:a=>`<h1>Connected apps</h1>${a}`,status:''});
   assert.match(page,/<img src="\/email-app-icon\.png"/);assert.match(page,/data-add-app[^>]*>Add AI app</);assert.match(page,/<h3 id="add-app-title">Add an AI app<\/h3>/);
   assert.match(page,/data-app="z1"><span class="st-tile"><svg[^>]*stroke="currentColor"/);assert.doesNotMatch(page,/>Z</);
