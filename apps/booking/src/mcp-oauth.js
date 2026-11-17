@@ -116,7 +116,7 @@ export async function handleOAuth(request,env,{origin,getSession}){
     const valid=grant&&grant.kind==='mcp'&&grant.status==='approved'&&grant.hostId&&grant.expiresAt>Date.now()&&grant.redirectUri===data.redirect_uri&&await timingSafeEqual(grant.clientHash,await sha256(data.client_id))&&await timingSafeEqual(await sha256(data.code_verifier),grant.challenge);
     if(!valid)return oauthError('invalid_grant','The authorization code is invalid, expired or already used.');
     try{const issued=await exchangeApprovedGrant(env,store,grant);return json({access_token:issued.accessToken,token_type:'Bearer',expires_in:issued.expiresIn,scope:PUBLIC_SCOPE},200,{Pragma:'no-cache'});}
-    catch(error){if(error?.code==='session_limit')return oauthError('invalid_request','Too many connected apps. Disconnect one in the Studio under Activity, then connect again.');if(error instanceof HttpError&&error.status===409)return oauthError('invalid_grant','The authorization code was already used.');if(error instanceof HttpError&&error.status<500)return oauthError('invalid_request',error.message);throw error;}
+    catch(error){if(error?.code==='session_limit')return oauthError('invalid_request','Too many connected apps. Disconnect one in the Studio under Settings, Connected apps, then connect again.');if(error instanceof HttpError&&error.status===409)return oauthError('invalid_grant','The authorization code was already used.');if(error instanceof HttpError&&error.status<500)return oauthError('invalid_request',error.message);throw error;}
   }
   return json({error:'not_found'},404);
 }

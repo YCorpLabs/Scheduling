@@ -1,18 +1,17 @@
 import { draftPreview } from "/preview-policy.js";
-import { showCalendarAccess } from "/calendar-access-ui.js";
 import { showShare } from "/share-ui.js";
 import { memberConnectUrl, memberCalendarPayload } from "/my-calendar-ui.js";
-import { accountMenuMarkup, bindAccountMenu } from "/account-menu.js";
+import { accountMenuMarkup, bindAccountMenu, accountName, initials, applyTheme, setTheme, followSystemTheme, syncThemeChoices } from "/account-menu.js";
 import { bindTeamEditor } from "/team-ui.js";
 import { newMeeting, meetingSlug } from "/meeting-defaults.js";
 import { showHostReschedule } from "/host-booking-ui.js";
-import { showProfile, profilePreview, changeProfileImage } from "/profile-ui.js";
+import { chooseProfileImage } from "/profile-ui.js";
 import { deliveryMarkup, hasDeliveryIssue } from "/delivery-ui.js";
 import { bindApprovalSettings, approvalNotice } from "/approval-ui.js";
 import { bindReminders } from "/reminder-ui.js";
 import { bindQuestionsEditor, savedIntakeMarkup } from "/intake-ui.js";
-import { showSessions } from "/session-ui.js";
-import { showManageAccount, createExportController, exportRequest, bindExportRow, canExportProfile, profileExportMarkup } from "/account-data-ui.js";
+import { createExportController, exportRequest, bindExportRow, canExportProfile, profileExportMarkup } from "/account-data-ui.js";
+import { showAccountDeletion } from "/account-deletion-ui.js";
 import { DEFAULT } from "/policy.js";
 import { meetingLink } from "/conference-ui.js";
 import { analyticsMarkup, bindAnalytics } from "/analytics-ui.js";
@@ -25,10 +24,18 @@ import { linksMarkup, linkMenuItems } from "/links-ui.js";
 import { editorMarkup, readEditor, ownHoursOf, previewSlots, previewMarkup, bindLength } from "/link-editor-ui.js";
 import { availabilityPageMarkup, bindAvailabilityPage, currentMonday, zoneLabel } from "/availability-page.js";
 import { addDays, weeklySummary, zonedEpoch } from "/week-calendar.js";
-import { WORKSPACE_HEADER, resolveWorkspaces, readStoredWorkspace, storeWorkspace, clearStoredWorkspace, captureInviteToken, stashInviteToken, takePendingInvite, clearPendingInvite, roleLabel, switcherMarkup, bindSwitcher, showCreateWorkspace, sectionsFor, can, canAdminister, cleanWorkspace, teamMarkup, bindTeam, showInviteDialog, showInviteAcceptance } from "/workspace-ui.js";
+import { WORKSPACE_HEADER, resolveWorkspaces, readStoredWorkspace, storeWorkspace, clearStoredWorkspace, captureInviteToken, stashInviteToken, takePendingInvite, clearPendingInvite, roleLabel, switcherMarkup, bindSwitcher, showCreateWorkspace, sectionsFor, can, canAdminister, cleanWorkspace, teamMarkup, bindTeam, showInviteDialog, showInviteAcceptance, confirmAction } from "/workspace-ui.js";
 import { integrationsMarkup, bindIntegrations, integrationsHeading } from "/integrations-ui.js";
-import { activityMarkup, bindActivity, loadActivity } from "/activity-ui.js";
+import { appView, appsPageMarkup, appDetailMarkup, loadApps, bindApps } from "/apps-ui.js";
+import { SETTINGS_PAGES, pageTitle, parseSettingsHash, settingsHash, settingsSidebarMarkup, phoneBack, pageHead, settingsListMarkup, profilePageMarkup, profileCardMarkup, accountPageMarkup, bindSettingsExport } from "/settings-ui.js";
 import { normalizeBrand, brandMark, studioName, legalLinksMarkup } from "/brand.js";
+const phone = () => {
+  try {
+    return matchMedia("(max-width: 720px)").matches;
+  } catch {
+    return false;
+  }
+};
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 let activeWorkspace = null, onCompanyRefusal = () => {
 };
@@ -64,9 +71,19 @@ export async function hostUI(bootstrap) {
     q.delete("workspace");
     history.replaceState(null, "", location.pathname + (q.size ? "?" + q : "") + location.hash);
   }
-  let ws = resolveWorkspaces(null), personalName = "", loadError = "", accessNotice = null, generation = 0, teamData = null, teamLoading = false, teamError = "", intData = null, intLoading = false, intError = "", actData = null, actLoading = false, actError = "", checkingAccess = false;
+  let ws = resolveWorkspaces(null), personalName = "", loadError = "", accessNotice = null, generation = 0, teamData = null, teamLoading = false, teamError = "", intData = null, intLoading = false, intError = "", checkingAccess = false;
+  // Settings: the open page ("" is the phone list), the app shown in Connected apps, and page data.
+  let settingsPage = null, settingsApp = null, appsData = null, appsLoading = false, appsError = "", browserList = null, browserError = "", accountExport = null, contributionReview = "", profileDraft = null, profileError = "", profileSaving = false, personalProfile = null, disposeAppsPopover = () => {
+  };
   const root = document.querySelector("#app");
-  const hashSection = (hash) => ({ "#calendars": "Availability", "#availability": "Availability", "#analytics": "Analytics", "#stats": "Analytics", "#status": "Status", "#team": "Team", "#integrations": "Integrations", "#activity": "Activity", "#links": "Meetings" })[hash] || (/^#link=/.test(hash) ? "Meetings" : "Bookings");
+  const hashSection = (hash) => parseSettingsHash(hash) ? "Settings" : ({ "#calendars": "Availability", "#availability": "Availability", "#analytics": "Analytics", "#stats": "Analytics", "#status": "Status", "#team": "Team", "#links": "Meetings" })[hash] || (/^#link=/.test(hash) ? "Meetings" : "Bookings");
+  {
+    const initial = parseSettingsHash(location.hash);
+    if (initial) {
+      settingsPage = initial.page;
+      settingsApp = initial.app;
+    }
+  }
   let settings, calendars = [], section = hashSection(location.hash), selected = 0, editing = !!initialLinkId, message = "", bookings = [], bookingView = "home", bookingQuery = "", bookingSearching = false, deciding = {}, bookingLoading = false, bookingLoaded = false, reconciliationIssues = [], notificationIssues = [], analyticsData = null, analyticsMetric = "pageViews", analyticsLoading = false, dirty = false, calendarsLoaded = false, savedTypeIds = new Set(), refreshTeamCalendars = () => {
   }, opsData = null, opsLoading = false, opsError = "";
   let profileExport = null;
@@ -147,7 +164,24 @@ export async function hostUI(bootstrap) {
     if (!failed) storeWorkspace(account, ws.active);
   }
   const allowed = () => sectionsFor(ws.active);
+  // The sidebar lists these; Activity and Integrations are Settings pages, and Stats and
+  // Troubleshooting open from Links (or Bookings) and from the attention banner.
+  const mainSections = () => allowed().filter((x) => ["Bookings", "Meetings", "Availability", "Team"].includes(x));
+  const settingsPages = () => SETTINGS_PAGES.map(([id]) => id).filter((id) => id === "Profile" ? can(ws.active, "manageSettings") : id === "Notifications" ? allowed().includes("Integrations") : true);
+  // "" is the list of pages, which only phones show; wider screens open the first page.
+  function currentSettingsPage() {
+    const pages = settingsPages();
+    if (pages.includes(settingsPage)) return settingsPage;
+    return phone() ? "" : pages[0];
+  }
   function ensureSection() {
+    if (section === "Settings") {
+      if (settingsPage && !settingsPages().includes(settingsPage)) {
+        settingsPage = null;
+        settingsApp = null;
+      }
+      return;
+    }
     if (!allowed().includes(section)) section = allowed()[0];
   }
   // Reads a load needs regardless of what it renders first.
@@ -181,6 +215,7 @@ export async function hostUI(bootstrap) {
       history.replaceState(null, "", location.pathname + (q.size ? "?" + q : "") + "#availability");
     }
     ensureSection();
+    if (section === "Settings") history.replaceState(null, "", hashFor("Settings"));
     // The listing has confirmed this workspace, so its bookings can load beside its settings.
     prefetch(ws.active, "bookings");
     try {
@@ -199,9 +234,10 @@ export async function hostUI(bootstrap) {
     }
     if (gen !== generation) return;
     if (ws.active.personal) {
+      personalProfile = { name: settings.profile?.name || "", avatarImage: settings.profile?.avatarImage || null };
       personalName = settings.profile?.name || bootstrap.email || "Your profile";
       ws.personal.name = personalName;
-    }
+    } else refreshPersonalProfile();
     savedTypeIds = new Set((settings.meetingTypes || []).map((t) => t.id));
     if (editing && !settings.meetingTypes[selected]) editing = false;
     if (first && initialLinkId) {
@@ -218,8 +254,7 @@ export async function hostUI(bootstrap) {
     if (section === "Analytics") await refreshAnalytics();
     if (section === "Status") await refreshOperations();
     if (section === "Team") await refreshTeam();
-    if (section === "Integrations") await refreshIntegrations();
-    if (section === "Activity") await refreshActivity();
+    if (section === "Settings") await loadSettingsPage();
     if (section === "Bookings") {
       await refreshBookings();
       if (first && initialBookingId && !linkDenied) await openBooking(initialBookingId, null);
@@ -260,10 +295,19 @@ export async function hostUI(bootstrap) {
       if (gen === generation) status(e.message);
     }
   }
-  // On phones the account button is hidden and More opens the same menu.
-  function accountOpener() {
-    const trigger = document.querySelector("#account-trigger");
-    return trigger?.getClientRects().length ? trigger : document.querySelector("[data-more]") || trigger;
+  const accountOpener = () => document.querySelector("#account-trigger");
+  // The signed-in person, also in a team after a reload: their own profile name, else their email.
+  const displayName = () => accountName({ profileName: ws.active.personal && settings ? settings.profile?.name : personalProfile?.name, email: bootstrap.email });
+  async function refreshPersonalProfile() {
+    if (ws.active.personal || personalProfile) return;
+    try {
+      const own = await api("settings", null, { workspace: ws.personal });
+      if (personalProfile) return;
+      personalProfile = { name: own.profile?.name || "", avatarImage: own.profile?.avatarImage || null };
+      if (personalProfile.name) personalName = ws.personal.name = personalProfile.name;
+      if (!dirty) render();
+    } catch {
+    }
   }
   // The editor is not re-rendered when calendars arrive (it may hold edits), so name the override in place.
   function refreshOverrideName() {
@@ -305,8 +349,14 @@ export async function hostUI(bootstrap) {
     teamData = null;
     teamError = "";
     intData = null;
-    actData = null;
     intError = "";
+    appsData = null;
+    appsError = "";
+    profileDraft = null;
+    profileError = "";
+    contributionReview = "";
+    accountExport?.controller.dispose();
+    accountExport = null;
     selected = 0;
     dirty = false;
   }
@@ -378,10 +428,10 @@ export async function hostUI(bootstrap) {
       checkingAccess = false;
     }
   };
-  const hashFor = (next) => next === "Meetings" ? editing && settings?.meetingTypes[selected] ? "#link=" + encodeURIComponent(settings.meetingTypes[selected].id) : "#links" : { Availability: "#availability", Analytics: "#stats", Status: "#status", Team: "#team", Integrations: "#integrations", Activity: "#activity" }[next] || location.pathname;
+  const hashFor = (next) => next === "Settings" ? settingsHash(currentSettingsPage(), settingsApp) : next === "Meetings" ? editing && settings?.meetingTypes[selected] ? "#link=" + encodeURIComponent(settings.meetingTypes[selected].id) : "#links" : { Availability: "#availability", Analytics: "#stats", Status: "#status", Team: "#team" }[next] || location.pathname;
   const hostId = () => settings?.hostId || bootstrap.hostId;
   const link = (t) => `${location.origin}/b/${hostId()}/${t.slug}`;
-  const sectionLabel = (name) => ({ Meetings: "Links", Analytics: "Stats", Status: "Troubleshooting" })[name] || name;
+  const sectionLabel = (name) => name === "Settings" ? pageTitle(currentSettingsPage()) : ({ Meetings: "Links", Analytics: "Stats", Status: "Troubleshooting" })[name] || name;
   function bookingLinks() {
     return linksMarkup({ settings, stats: linkStats, savedIds: savedTypeIds, canEdit: can(ws.active, "manageSettings"), copied: copiedLink });
   }
@@ -447,8 +497,8 @@ export async function hostUI(bootstrap) {
       loadPreview: async (duration) => draftPreview(settings, previewDraft(draft), Date.now(), duration)
     });
   }
-  const icons = { Activity: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', Availability: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18m-13 5 2 2 5-5"/>', Team: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.2A5 5 0 0 1 20.5 19"/>', Integrations: '<path d="M9 7V4M15 7V4"/><rect x="6" y="7" width="12" height="6" rx="2"/><path d="M12 13v3a4 4 0 0 1-4 4"/>', Status: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>', Analytics: '<path d="M4 20h16M7 16v-5m5 5V5m5 11V8"/>', Meetings: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h5"/>', Calendars: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18"/>', Bookings: '<path d="M8 3h8v4H8z"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 14l3 3 5-6"/>', arrow: '<path d="m9 5 7 7-7 7"/>', refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 18 17"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>' };
-  const icon = (name) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.Bookings}</svg>`;
+  const icons = { refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 18 17"/>', close: '<path d="m6 6 12 12M18 6 6 18"/>' };
+  const icon = (name) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || ""}</svg>`;
   const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
   const zone = () => myAvailability()?.zone || browserZone();
   const fmt = (ms, opts) => new Intl.DateTimeFormat(void 0, { timeZone: zone(), ...opts }).format(ms);
@@ -466,10 +516,13 @@ export async function hostUI(bootstrap) {
     return booking.location ? `<dt>Location</dt><dd>${esc(booking.location)}</dd>` : "";
   }
   // ----- Bookings home and first run -----
+  // Troubleshooting has no place in the sidebar; this banner is where it opens from.
   function attentionNotice() {
     if (!reconciliationIssues.length && !notificationIssues.length) return "";
-    const auth = reconciliationIssues.some((i) => i.kind === "authorization");
-    return `<div class="booking-attention" role="status"><div><strong>${auth ? "Reconnect your calendar" : reconciliationIssues.length ? "Some bookings are waiting for calendar sync" : "Some booking emails need attention"}</strong><p>${auth ? "Calendar access has expired. Reconnect to finish syncing." : reconciliationIssues.length ? "Your bookings are saved. We’ll keep trying to sync them with Google." : "Calendar bookings are saved, but email delivery needs review."}</p></div>${auth ? allowed().includes("Availability") ? '<button class="secondary" data-section="Availability">Open Availability</button>' : "" : reconciliationIssues.length ? '<button class="secondary" id="retry-sync">Retry sync</button>' : allowed().includes("Status") ? '<button class="secondary" data-section="Status">Review emails</button>' : ""}</div>`;
+    const auth = reconciliationIssues.some((i) => i.kind === "authorization"), status = allowed().includes("Status");
+    const action = auth ? allowed().includes("Availability") ? '<button class="secondary" data-section="Availability">Open Availability</button>' : "" : reconciliationIssues.length ? '<button class="secondary" id="retry-sync">Retry sync</button>' : status ? '<button class="secondary" data-section="Status">Review emails</button>' : "";
+    const troubleshooting = status && (auth || reconciliationIssues.length) ? '<button type="button" class="link-button" data-section="Status">Troubleshooting</button>' : "";
+    return `<div class="booking-attention" role="status"><div><strong>${auth ? "Reconnect your calendar" : reconciliationIssues.length ? "Some bookings are waiting for calendar sync" : "Some booking emails need attention"}</strong><p>${auth ? "Calendar access has expired. Reconnect to finish syncing." : reconciliationIssues.length ? "Your bookings are saved. We’ll keep trying to sync them with Google." : "Calendar bookings are saved, but email delivery needs review."}</p></div>${action || troubleshooting ? `<div class="booking-attention-actions">${troubleshooting}${action}</div>` : ""}</div>`;
   }
   const setupKey = () => "scheduling-setup:" + (settings?.hostId || bootstrap.hostId || "");
   function setupProgress() {
@@ -511,7 +564,7 @@ export async function hostUI(bootstrap) {
     }
   }
   function bookingList(notices = "") {
-    return bookingsMarkup({ bookings, view: bookingView, query: bookingQuery, searching: bookingSearching, fmt, zoneName: zoneLabel(zone()), canDecide: can(ws.active, "approveBookings"), deciding, loading: bookingLoading && !bookingLoaded, setup: bookingView === "home" ? setupCard() : "", notices: notices + attentionNotice() });
+    return bookingsMarkup({ bookings, view: bookingView, query: bookingQuery, searching: bookingSearching, fmt, zoneName: zoneLabel(zone()), canDecide: can(ws.active, "approveBookings"), deciding, loading: bookingLoading && !bookingLoaded, setup: bookingView === "home" ? setupCard() : "", notices: notices + attentionNotice(), stats: allowed().includes("Analytics") && !allowed().includes("Meetings") });
   }
   function refreshButton(id, loading) {
     return `<button class="secondary refresh-bookings" id="${id}" aria-label="Refresh" ${loading ? "disabled" : ""}>${icon("refresh")}<span>${loading ? "Refreshing…" : "Refresh"}</span></button>`;
@@ -521,7 +574,6 @@ export async function hostUI(bootstrap) {
     if (section === "Analytics") return refreshButton("refresh-analytics", analyticsLoading);
     if (section === "Status") return refreshButton("refresh-operations", opsLoading);
     if (section === "Team" && canAdminister(ws.active) && teamData) return '<button class="primary compact-button" id="team-invite">Invite</button>';
-    if (section === "Integrations") return integrationsHeading(intData);
     return "";
   }
   async function refreshContributions() {
@@ -783,9 +835,34 @@ export async function hostUI(bootstrap) {
     if (section === "Analytics") return analyticsData ? analyticsMarkup(analyticsData, analyticsMetric) : `<p role="status">${analyticsLoading ? "Loading stats…" : "Stats are unavailable. Try refreshing."}</p>`;
     if (section === "Status") return operationsMarkup(opsData, { loading: opsLoading, error: opsError, formatTime: time });
     if (section === "Team") return `<div class="team-workspace">${teamMarkup(teamData, { workspace: ws.active, email: bootstrap.email, loading: teamLoading, error: teamError, formatDate: (ms) => fmt(ms, { month: "short", day: "numeric" }) })}${companyCalendarsMarkup()}${teamData ? profileExportMarkup(ws.active) : ""}</div>`;
-    if (section === "Integrations") return integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time });
-    if (section === "Activity") return activityMarkup(actData, { loading: actLoading, error: actError, formatTime: time, formatDate: (ms) => fmt(ms, { month: "short", day: "numeric" }), origin: location.origin, showAccount: !ws.active.personal });
     return bookingList(notices);
+  }
+  // ----- Settings -----
+  function profileValues() {
+    const saved = settings?.profile || {};
+    return profileDraft || { name: saved.name || "", company: saved.company || "", avatarImage: saved.avatarImage || null, bannerImage: saved.bannerImage || null };
+  }
+  const workspaceName = (id) => ws.workspaces.find((w) => w.id === id)?.name || "Former team";
+  function settingsSummary(page) {
+    if (page === "Profile") return [settings?.profile?.name, settings?.profile?.company].filter(Boolean).join(" · ");
+    if (page === "Apps") return appsData?.apps ? appsData.apps.length ? [...new Set(appsData.apps.map((app) => appView(app).title))].join(", ") : "None connected" : "";
+    if (page === "Notifications") return intData?.integrations ? intData.integrations.length ? intData.integrations.map((i) => i.name).join(", ") : "None set up" : "";
+    return bootstrap.email || "";
+  }
+  function settingsBody(notices) {
+    const page = currentSettingsPage(), back = phoneBack(), time = (ms) => fmt(ms, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    if (page === "") return settingsListMarkup(settingsPages().map((id) => ({ page: id, summary: settingsSummary(id) })));
+    if (page === "Profile") {
+      if (!settings) return back + pageHead("Profile") + notices + (loadError ? `<p class="st-note error" role="alert">${esc(loadError)}</p>` : '<p class="st-note" role="status">Loading…</p>');
+      return back + profilePageMarkup({ values: profileValues(), meeting: settings.meetingTypes?.[0], head: pageHead("Profile"), status: notices, error: profileError, saving: profileSaving });
+    }
+    if (page === "Apps") {
+      const app = settingsApp && appsData?.apps?.find((a) => a.id === settingsApp);
+      if (app) return appDetailMarkup(appView(app, { activity: appsData.activity }), { fmt, status: notices });
+      return back + appsPageMarkup(appsData, { loading: appsLoading, error: appsError, origin: location.origin, head: (action) => pageHead("Connected apps", action), status: notices });
+    }
+    if (page === "Notifications") return back + pageHead("Notifications", intData ? integrationsHeading(intData) : "") + '<p class="st-lead">Post new and changed bookings where your team will see them.</p>' + notices + integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time });
+    return back + accountPageMarkup({ email: bootstrap.email || "", head: pageHead("Sign-in & data"), status: notices, sessions: browserList, sessionsError: browserError, contributions, workspaceName, review: contributionReview, legal: legalLinksMarkup(brand) });
   }
   // Calendars an admin connected for the whole team (from before members had their own).
   function companyCalendarsMarkup() {
@@ -799,24 +876,49 @@ export async function hostUI(bootstrap) {
   }
   function render() {
     avUnbind();
+    disposeAppsPopover();
     const accountMenuWasOpen = disposeAccountMenu();
-    const focusedSection = document.activeElement?.dataset?.section;
-    document.documentElement.dataset.theme = localStorage.getItem("scheduling-theme") || "light";
+    const focused = document.activeElement, focusedSection = focused?.dataset?.section, focusedPage = focused?.closest?.(".host-nav") ? focused.dataset?.settingsPage : void 0;
+    // A Settings page repaints when its data arrives; keep keyboard focus on the same control.
+    const focusedExport = !!focused?.closest?.("[data-export-actions]"), focusedKey = focused?.closest?.(".st-page") ? focusKey(focused) : "";
+    applyTheme();
     document.documentElement.dataset.accent = "graphite";
-    const company = ws.active.personal ? null : ws.active, profile = settings?.profile || {};
+    const profile = settings?.profile || {}, inSettings = section === "Settings", page = inSettings ? currentSettingsPage() : null;
+    const company = ws.active.personal ? null : ws.active;
     document.title = (section === "Meetings" && editing && settings?.meetingTypes[selected] ? settings.meetingTypes[selected].title : sectionLabel(section)) + " · " + (company ? company.name + " · " : "") + studioName(brand);
-    const name = company ? personalName : profile.name, avatar = company ? "" : profile.avatarImage;
-    const requests = bookings.filter(isRequest).length, primary = allowed().filter((x) => ["Bookings", "Meetings", "Availability", "Activity"].includes(x)), setupSections = allowed().filter((x) => ["Team", "Integrations"].includes(x));
-    const navButton = (x) => `<button data-section="${x}" ${section === x ? 'aria-current="page"' : ""} class="${section === x ? "active" : ""}">${icon(x)}<span>${sectionLabel(x)}</span>${x === "Bookings" && requests ? `<span class="nav-count" aria-label="${requests} waiting for your OK">${requests}</span>` : ""}</button>`;
-    const ownHead = section === "Bookings" || section === "Meetings";
+    const name = displayName(), avatar = ws.active.personal ? profile.avatarImage : personalProfile?.avatarImage;
+    const requests = bookings.filter(isRequest).length, primary = mainSections();
+    const count = (x, tag) => x === "Bookings" && requests ? `<${tag} class="sb-count" aria-label="${requests} waiting for your OK">${requests}</${tag}>` : "";
+    const navRow = (x) => `<button type="button" class="sb-row" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}><span>${sectionLabel(x)}</span>${count(x, "span")}</button>`;
     const notices = `${accessNotice ? `<div class="setup-callout workspace-notice" role="alert"><div><strong>You no longer have access to ${esc(accessNotice.name)}</strong></div><button class="secondary compact-button" data-workspace-personal>Back to your profile</button></div>` : ""}${reconnectNotice()}<p id="host-status" class="${message ? "has-message" : ""}" role="status">${esc(message)}</p>`;
-    const heading = section === "Analytics" && allowed().includes("Meetings") ? `<div><button type="button" class="back-to-links" data-section="Meetings">← Links</button><h1>Stats</h1></div>` : `<div><h1>${sectionLabel(section)}</h1></div>`;
-    const moreSections = [...allowed().includes("Activity") ? ["Activity"] : [], ...setupSections, ...allowed().includes("Analytics") ? ["Analytics"] : []].map((x) => [x, sectionLabel(x)]);
-    root.innerHTML = `<div class="host-console"><aside class="host-nav"><div class="host-brand"><a class="wordmark" href="/studio"><span class="host-logo">${esc(brandMark(brand))}</span>${esc(brand.productName)}</a>${switcherMarkup({ ...ws, workspaces: ws.workspaces.map((w) => w.personal ? { ...w, name: personalName || bootstrap.email || "Your profile" } : w), active: { ...ws.active, ...ws.active.personal ? { name: personalName || bootstrap.email || "Your profile" } : {}, avatarImage: profile.avatarImage } })}</div><nav aria-label="Scheduling">${primary.map(navButton).join("")}${setupSections.length ? `<p class="nav-group" aria-hidden="true">Setup</p>${setupSections.map(navButton).join("")}` : ""}</nav>${accountMenuMarkup({ name: name || "Your account", email: bootstrap.email, avatar, editProfile: can(ws.active, "manageSettings") && !!settings, editPicture: !!settings && !company && can(ws.active, "manageSettings"), troubleshooting: allowed().includes("Status"), issues: attentionCount(opsData), calendarAccess: contributions.length > 0, dark: document.documentElement.dataset.theme === "dark", sections: moreSections })}<div class="host-legal">${legalLinksMarkup(brand)}</div></aside><main class="host-content" id="main">${ownHead ? sectionBody(notices) : `<header class="host-heading">${heading}${headingAction()}</header>${notices}${sectionBody()}`}</main><nav class="tabbar" aria-label="Sections">${primary.filter((x) => x !== "Activity").map((x) => `<button type="button" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}>${icon(x)}<span>${sectionLabel(x)}</span>${x === "Bookings" && requests ? `<em aria-label="${requests} waiting">${requests}</em>` : ""}</button>`).join("")}<button type="button" data-more aria-label="More">${icon("more")}<span>More</span></button></nav></div>`;
+    const back = section === "Analytics" ? allowed().includes("Meetings") ? ["Meetings", "← Links"] : ["Bookings", "← Bookings"] : section === "Status" ? ["Bookings", "← Bookings"] : null;
+    const heading = `<div>${back ? `<button type="button" class="back-to-links" data-section="${back[0]}">${back[1]}</button>` : ""}<h1>${sectionLabel(section)}</h1></div>`;
+    const ownName = accountName({ profileName: personalProfile?.name || (ws.active.personal ? profile.name : ""), email: bootstrap.email });
+    const switcher = switcherMarkup({ ...ws, workspaces: ws.workspaces.map((w) => w.personal ? { ...w, name: ownName } : w), active: { ...ws.active, ...ws.active.personal ? { name: ownName } : {}, avatarImage: profile.avatarImage } }) || `<div class="sb-row sb-brand"><span class="workspace-mark" aria-hidden="true">${esc(brandMark(brand))}</span><strong>${esc(brand.productName)}</strong></div>`;
+    const account = accountMenuMarkup({ name, email: bootstrap.email, avatar });
+    const sidebar = inSettings ? settingsSidebarMarkup({ pages: settingsPages(), current: page, account }) : `<div class="host-brand">${switcher}</div><nav class="sb-nav" aria-label="Scheduling">${primary.map(navRow).join("")}</nav><div class="sb-bottom"><button type="button" class="sb-row" data-section="Settings">Settings</button>${account}</div>`;
+    const ownHead = section === "Bookings" || section === "Meetings";
+    const body = inSettings ? `<div class="st-page${page === "Profile" ? " st-wide" : ""}">${settingsBody(notices)}</div>` : ownHead ? sectionBody(notices) : `<header class="host-heading">${heading}${headingAction()}</header>${notices}${sectionBody()}`;
+    const tabs = [...primary, "Settings"].map((x) => `<button type="button" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}><span>${x === "Settings" ? "Settings" : sectionLabel(x)}</span>${count(x, "em")}</button>`).join("");
+    root.innerHTML = `<div class="host-console${inSettings ? " in-settings" : ""}"><aside class="host-nav">${sidebar}</aside><main class="host-content${inSettings ? " is-settings" : ""}" id="main">${body}</main><nav class="tabbar" aria-label="Sections">${tabs}</nav></div>`;
     bind();
     alignNavigation();
     if (accountMenuWasOpen) accountOpener()?.focus({ preventScroll: true });
     if (focusedSection === section) root.querySelector(`.host-nav [data-section="${section}"]`)?.focus({ preventScroll: true });
+    if (focusedPage !== void 0 && inSettings) root.querySelector(`.host-nav [data-settings-page="${CSS.escape(page)}"]`)?.focus({ preventScroll: true });
+    if (focusedExport) root.querySelector("[data-account-export] [data-export-actions] a, [data-account-export] [data-export-actions] button")?.focus({ preventScroll: true });
+    else if (focusedKey) {
+      try {
+        root.querySelector(".st-page " + focusedKey)?.focus({ preventScroll: true });
+      } catch {
+      }
+    }
+  }
+  // A selector for the focused control: its id, or its data attributes and label.
+  function focusKey(el) {
+    if (el.id) return "#" + CSS.escape(el.id);
+    const attrs = [...el.attributes].filter((a) => a.name.startsWith("data-") || a.name === "aria-label").map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join("");
+    return attrs ? el.tagName.toLowerCase() + attrs : "";
   }
   function alignNavigation() {
     const nav = root.querySelector(".host-nav nav"), current = nav?.querySelector("[aria-current=page]");
@@ -863,24 +965,62 @@ export async function hostUI(bootstrap) {
       }
     }
   }
-  async function refreshActivity() {
+  async function refreshApps() {
     const gen = generation;
-    actLoading = true;
-    if (!actData) render();
+    appsLoading = true;
+    if (!appsData && section === "Settings") render();
     try {
-      const result = await loadActivity(api);
+      const result = await loadApps(api, { activity: allowed().includes("Activity") });
       if (gen !== generation) return;
-      actData = result;
-      actError = "";
+      appsData = result;
+      appsError = result.apps === null ? "Connected apps could not be loaded." : "";
+      if (settingsApp && result.apps && !result.apps.some((a) => a.id === settingsApp)) {
+        settingsApp = null;
+        if (section === "Settings") history.replaceState(null, "", hashFor("Settings"));
+      }
     } catch (e) {
       if (gen !== generation) return;
-      actError = e.message || "Activity could not be loaded.";
+      appsError = e.message || "Connected apps could not be loaded.";
     } finally {
       if (gen === generation) {
-        actLoading = false;
-        render();
+        appsLoading = false;
+        if (section === "Settings" && !dirty) render();
       }
     }
+  }
+  async function refreshBrowsers() {
+    const gen = generation;
+    try {
+      const result = await api("sessions");
+      if (gen !== generation) return;
+      browserList = result.sessions || [];
+      browserError = "";
+    } catch (e) {
+      if (gen !== generation) return;
+      browserError = e.message || "Browsers could not be loaded.";
+    } finally {
+      if (gen === generation && section === "Settings" && !dirty) render();
+    }
+  }
+  async function loadSettingsPage() {
+    const page = currentSettingsPage();
+    if (page === "") await Promise.all([refreshApps(), settingsPages().includes("Notifications") ? refreshIntegrations() : null]);
+    if (page === "Apps") await refreshApps();
+    if (page === "Notifications") await refreshIntegrations();
+    if (page === "Account") await Promise.all([refreshBrowsers(), refreshContributions()]);
+  }
+  // Opens Settings, a page of it, or one connected app. With no page, phones get the list.
+  async function openSettings(page = null, app = null) {
+    section = "Settings";
+    settingsPage = page;
+    settingsApp = page === "Apps" ? app : null;
+    if (page !== "Account") contributionReview = "";
+    profileError = "";
+    message = "";
+    history.replaceState(null, "", hashFor("Settings"));
+    render();
+    if (!settings) return;
+    await loadSettingsPage();
   }
   async function refreshIntegrations() {
     const gen = generation;
@@ -965,6 +1105,9 @@ export async function hostUI(bootstrap) {
   }
   async function navigate(next) {
     if (next === "Calendars") next = "Availability";
+    if (next === "Activity") return openSettings("Apps");
+    if (next === "Integrations") return openSettings("Notifications");
+    if (next === "Settings") return openSettings();
     if (!allowed().includes(next)) return;
     section = next;
     if (next === "Meetings") editing = false;
@@ -978,8 +1121,6 @@ export async function hostUI(bootstrap) {
     if (next === "Status") await refreshOperations();
     if (next === "Analytics") await refreshAnalytics();
     if (next === "Team") await refreshTeam();
-    if (next === "Integrations") await refreshIntegrations();
-    if (next === "Activity") await refreshActivity();
     if (next === "Availability") await refreshAvailability();
   }
   async function openBooking(id, trigger, { confirmCancel = false, reschedule = false } = {}) {
@@ -1235,61 +1376,9 @@ export async function hostUI(bootstrap) {
     card.querySelector(".brand-duration").textContent = "◷ " + values.get("duration") + " min";
     card.querySelector(".brand-location").textContent = values.get("locationType") === "google_meet" ? "Google Meet" : values.get("location") || "";
   }
+  // "Name and picture" in a link's Appearance opens Settings → Profile.
   function bindProfileButtons() {
-    document.querySelectorAll("[data-profile]").forEach((button) => button.onclick = () => {
-      const trigger = button.closest("#account-menu") ? accountOpener() : button;
-      const gen = generation, profileApi = (path, data) => {
-        if (gen !== generation) throw Error("The profile changed. Choose the image again.");
-        return api(path, data);
-      }, key = button.dataset.profile === "banner" ? "bannerImage" : "avatarImage", selector = `[data-profile="${button.dataset.profile}"]`, restore = () => gen === generation ? (button.closest("#account-menu") ? accountOpener() : document.querySelector(selector)) : null;
-      const merge = (latest) => {
-        if (gen !== generation) return;
-        if (dirty) {
-          if (fingerprint(latest) !== settingsBaseline) draftNeedsReview = true;
-          settings = { ...settings, profile: latest.profile, revision: latest.revision };
-        } else {
-          settings = { ...latest };
-          settingsBaseline = fingerprint(latest);
-          draftNeedsReview = false;
-          if (!settings.meetingTypes[selected]) editing = false;
-        }
-      };
-      const saved = (result) => {
-        if (gen !== generation) return;
-        status("");
-        merge({ ...result.settings, revision: result.revision });
-        if (ws.active.personal) {
-          personalName = settings.profile.name || bootstrap.email;
-          ws.personal.name = personalName;
-        }
-        if (!dirty) {
-          render();
-          requestAnimationFrame(() => restore()?.focus());
-          return;
-        }
-        const preview = document.querySelector(".appearance-preview");
-        if (preview) {
-          const form = document.querySelector("#meeting-form"), type = { ...settings.meetingTypes[selected] };
-          for (const name of ["title", "description", "location", "locationType", "theme", "accent", "motion"]) {
-            const field2 = form?.elements[name];
-            if (field2) type[name] = field2.value;
-          }
-          type.duration = Number(form?.elements.duration?.value || type.duration);
-          preview.innerHTML = profilePreview(settings.profile, type);
-        }
-        const mark = document.querySelector(".workspace-trigger .workspace-mark");
-        if (mark) mark.innerHTML = settings.profile.avatarImage ? `<img src="${esc(settings.profile.avatarImage)}" alt="">` : esc((settings.profile.name || "?").slice(0, 1));
-        const avatar = document.querySelector(".host-identity .host-avatar");
-        if (avatar && ws.active.personal) avatar.innerHTML = settings.profile.avatarImage ? `<img src="${esc(settings.profile.avatarImage)}" alt="">` : esc((personalName || "?").slice(0, 1));
-        const identity = document.querySelector(".host-identity strong");
-        if (identity && ws.active.personal) identity.textContent = personalName;
-        bindProfileButtons();
-      };
-      if (["banner", "picture", "avatar"].includes(button.dataset.profile)) changeProfileImage(profileApi, { key, isCurrent: () => gen === generation, profile: settings.profile, revision: settings.revision, trigger, restore, onSaved: saved, onLoaded: merge, onError: (e) => {
-        if (gen === generation) status(e.message);
-      } });
-      else showProfile(profileApi, settings.profile, settings.revision, { trigger, onLoaded: merge, onSaved: saved });
-    });
+    document.querySelectorAll("[data-profile=appearance]").forEach((button) => button.onclick = () => leaveEditor(() => openSettings("Profile")));
   }
   function bind() {
     disposeAccountMenu = bindAccountMenu(root);
@@ -1298,7 +1387,14 @@ export async function hostUI(bootstrap) {
     });
     bindProfileButtons();
     document.querySelectorAll("[data-section]").forEach((b) => b.onclick = () => leaveEditor(() => navigate(b.dataset.section)));
-    document.querySelector("[data-more]")?.addEventListener("click", () => document.querySelector("#account-trigger")?.click());
+    document.querySelectorAll("[data-settings-page]").forEach((b) => b.onclick = () => leaveEditor(() => openSettings(b.dataset.settingsPage || (phone() ? "" : null))));
+    document.querySelector("[data-settings-back]")?.addEventListener("click", () => leaveEditor(async () => {
+      await navigate("Bookings");
+    }));
+    document.querySelectorAll("[data-theme-choice]").forEach((b) => b.onclick = () => {
+      setTheme(b.dataset.themeChoice);
+      syncThemeChoices();
+    });
     document.querySelectorAll("[data-type]").forEach((b) => b.onclick = () => leaveEditor(() => editLink(Number(b.dataset.type))));
     document.querySelector("[data-own-retry]")?.addEventListener("click", () => refreshAvailability());
     if (section === "Availability") bindAvailabilityRoot();
@@ -1352,31 +1448,12 @@ export async function hostUI(bootstrap) {
         }
       } });
     });
-    document.querySelector("#host-theme").onclick = () => leaveEditor(() => {
-      localStorage.setItem("scheduling-theme", document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-      render();
-      accountOpener()?.focus();
-    });
-    document.querySelector("#calendar-access")?.addEventListener("click", () => leaveEditor(() => showCalendarAccess({ api, workspaceName: (id) => ws.workspaces.find((w) => w.id === id)?.name || "Former team", trigger: accountOpener(), onChanged: async () => {
-      ownLoad++;
-      ownCalendar = null;
-      try {
-        contributions = (await api("calendar-contributions")).contributions || [];
-      } catch {
-      }
-      if (section === "Availability") await refreshAvailability();
-      render();
-    } })));
-    document.querySelector("#manage-account").onclick = () => {
-      const trigger = accountOpener();
-      leaveEditor(() => showManageAccount({ email: bootstrap.email, accountId: bootstrap.hostId, trigger, onSessions: (button) => showSessions(api, button) }));
-    };
-    document.querySelector("#sign-out").onclick = () => leaveEditor(async () => {
+    document.querySelectorAll("[data-sign-out]").forEach((b) => b.onclick = () => leaveEditor(async () => {
       await fetch("/auth/logout", { method: "POST" });
       clearStoredWorkspace();
       clearPendingInvite();
       location.reload();
-    });
+    }));
     bindSwitcher(root, { onSelect: selectWorkspace, onCreate: (trigger) => leaveEditor(() => createProfile(trigger)) });
     document.querySelectorAll("[data-workspace-personal]").forEach((b) => b.onclick = () => leaveEditor(() => switchTo(ws.personal)));
     const retryLoad = document.querySelector("#retry-load");
@@ -1397,8 +1474,169 @@ export async function hostUI(bootstrap) {
       if (invite) invite.onclick = () => showInviteDialog(api, { workspace: ws.active, trigger: invite, formatDate: (ms) => fmt(ms, { month: "short", day: "numeric" }), onInvited: refreshTeam });
     }
     bindProfileExport();
-    if (section === "Integrations" && settings) bindIntegrations(main, { api, getData: () => intData, reload: refreshIntegrations, status });
-    if (section === "Activity" && settings) bindActivity(main, { data: () => actData, reload: refreshActivity, status, openBooking });
+    bindSettings(main);
+  }
+  function bindSettings(main) {
+    const page = section === "Settings" ? currentSettingsPage() : null;
+    bindAccountExport(page === "Account");
+    if (page === "Profile") bindProfilePage();
+    if (page === "Notifications" && settings) bindIntegrations(main, { api, getData: () => intData, reload: refreshIntegrations, status });
+    if (page === "Apps") {
+      const views = () => (appsData?.apps || []).map((app) => appView(app, { activity: appsData.activity }));
+      disposeAppsPopover = bindApps(main, { status, onOpen: (id) => openSettings("Apps", id), onBack: () => openSettings("Apps"), onRetry: () => refreshApps(), openBooking, getView: (id) => views().find((view) => view.id === id), onDisconnect: async (view) => {
+        settingsApp = null;
+        await refreshApps();
+        history.replaceState(null, "", hashFor("Settings"));
+        message = `${view.title} disconnected`;
+        render();
+        document.querySelector("#main h1")?.focus();
+      } });
+    }
+    if (page === "Account") bindAccountPage();
+  }
+  function bindAccountExport(shown) {
+    const row = shown && document.querySelector("[data-account-export]");
+    if (!row) {
+      accountExport?.controller.dispose();
+      accountExport = null;
+      return;
+    }
+    if (!accountExport || accountExport.controller.disposed) {
+      const entry = { draw: () => {
+      } };
+      entry.controller = createExportController({ scope: "account", request: exportRequest({ scope: "account", expectedAccountId: bootstrap.hostId }), isCurrent: () => section === "Settings" && currentSettingsPage() === "Account", onUpdate: (state) => entry.draw(state) });
+      accountExport = entry;
+    }
+    accountExport.draw = bindSettingsExport(row, accountExport.controller, { productName: brand.productName });
+  }
+  function bindAccountPage() {
+    document.querySelector("[data-sessions-retry]")?.addEventListener("click", () => refreshBrowsers());
+    document.querySelector("[data-contribution-retry]")?.addEventListener("click", () => refreshContributions());
+    const signOutBrowser = (title, body, request) => async (event) => confirmAction({ title, body, confirmLabel: "Sign out", trigger: event.currentTarget, restore: () => document.querySelector("[data-revoke-session]") || document.querySelector("#main h1"), run: async () => {
+      await api(...request);
+      await refreshBrowsers();
+      status("Signed out");
+    } });
+    document.querySelectorAll("[data-revoke-session]").forEach((b) => b.onclick = signOutBrowser("Sign out this browser?", "Anyone using that browser will need to sign in again.", ["sessions/revoke", { id: b.dataset.revokeSession }]));
+    const others = document.querySelector("[data-revoke-others]");
+    if (others) others.onclick = signOutBrowser("Sign out all other browsers?", "Anyone using those browsers will need to sign in again.", ["sessions/revoke-others", {}]);
+    const remove = document.querySelector("[data-delete-account]");
+    if (remove) remove.onclick = () => {
+      accountExport?.controller.cancel();
+      showAccountDeletion({ email: bootstrap.email, accountId: bootstrap.hostId, trigger: remove, onExport: () => {
+        accountExport?.controller.start();
+        document.querySelector("[data-account-export] [data-export-actions] button")?.focus();
+      } });
+    };
+    document.querySelectorAll("[data-withdraw]").forEach((b) => b.onclick = () => {
+      const item = contributions[Number(b.dataset.withdraw)];
+      if (!item) return;
+      const team = workspaceName(item.workspaceId);
+      confirmAction({ title: `Stop sharing with ${team}?`, body: "Existing Google meetings remain. Accepted bookings may need review.", confirmLabel: "Stop sharing", trigger: b, restore: () => document.querySelector("[data-withdraw]") || document.querySelector("#calendar-access-title"), run: async () => {
+        const result = await api("calendar-contributions/withdraw", { workspaceId: item.workspaceId, accountId: item.accountId });
+        const n = Number(result?.acceptedBookingsNeedReview) || 0;
+        contributionReview = n ? `${n} accepted booking${n === 1 ? "" : "s"} in ${team} need${n === 1 ? "s" : ""} review.` : "";
+        ownLoad++;
+        ownCalendar = null;
+        await refreshContributions();
+        render();
+      } });
+    });
+  }
+  function bindProfilePage() {
+    const form = document.querySelector("#profile-form");
+    if (!form || !settings) return;
+    const gen = generation, card = document.querySelector("[data-profile-card]"), error = form.querySelector("#profile-error");
+    const read = () => ({ ...profileValues(), name: form.elements.name.value, company: form.elements.company.value });
+    const edit = (next) => {
+      profileDraft = next;
+      dirty = true;
+      profileError = "";
+      error.textContent = "";
+    };
+    form.oninput = () => {
+      edit(read());
+      card.innerHTML = profileCardMarkup(profileDraft, settings.meetingTypes?.[0]);
+    };
+    form.querySelectorAll("[data-pick-image]").forEach((b) => b.onclick = async () => {
+      const key = b.dataset.pickImage;
+      try {
+        const value = await chooseProfileImage(key, { isCurrent: () => gen === generation });
+        if (!value || gen !== generation) return;
+        edit({ ...read(), [key]: value });
+      } catch (e) {
+        if (gen !== generation) return;
+        profileDraft = read();
+        profileError = e.message;
+      }
+      render();
+      document.querySelector(`[data-pick-image="${key}"]`)?.focus();
+    });
+    form.querySelectorAll("[data-remove-image]").forEach((b) => b.onclick = () => {
+      const key = b.dataset.removeImage;
+      edit({ ...read(), [key]: null });
+      render();
+      document.querySelector(`[data-pick-image="${key}"]`)?.focus();
+    });
+    form.onsubmit = async (event) => {
+      event?.preventDefault?.();
+      if (profileSaving) return;
+      const draft = read(), before = settings.profile || {}, patch = {};
+      if (!draft.name.trim()) {
+        profileDraft = draft;
+        profileError = "Enter a name.";
+        error.textContent = profileError;
+        form.elements.name.setAttribute("aria-invalid", "true");
+        form.elements.name.focus();
+        return;
+      }
+      if (draft.name.trim() !== (before.name || "")) patch.name = draft.name.trim();
+      if (draft.company.trim() !== (before.company || "")) patch.company = draft.company.trim();
+      for (const key of ["avatarImage", "bannerImage"]) if ((draft[key] || null) !== (before[key] || null)) patch[key] = draft[key] || null;
+      profileDraft = draft;
+      if (!Object.keys(patch).length) {
+        profileDraft = null;
+        dirty = false;
+        message = "Saved";
+        render();
+        return;
+      }
+      profileSaving = true;
+      render();
+      try {
+        const result = await api("settings", { patch: { profile: patch }, expectedRevision: settings.revision });
+        if (gen !== generation) return;
+        settings = { linkAccess: settings.linkAccess, ...result.settings, revision: result.revision };
+        settingsBaseline = fingerprint(settings);
+        profileDraft = null;
+        dirty = false;
+        profileError = "";
+        if (ws.active.personal) {
+          personalProfile = { name: settings.profile.name || "", avatarImage: settings.profile.avatarImage || null };
+          personalName = ws.personal.name = settings.profile.name || bootstrap.email;
+        }
+        message = "Saved";
+      } catch (e) {
+        if (gen !== generation) return;
+        profileError = e.message || "Your profile could not be saved.";
+        if (e.code === "settings_conflict") {
+          try {
+            const latest = await api("settings");
+            if (gen !== generation) return;
+            settings = latest;
+            settingsBaseline = fingerprint(latest);
+            profileError = "Your profile changed elsewhere. Your edits are still here. Save again to use them.";
+          } catch {
+          }
+        }
+      } finally {
+        if (gen === generation) {
+          profileSaving = false;
+          render();
+          document.querySelector(profileError ? "#profile-name" : "#profile-form [type=submit]")?.focus();
+        }
+      }
+    };
   }
   // ----- Bookings -----
   function bindBookings() {
@@ -1780,6 +2018,8 @@ export async function hostUI(bootstrap) {
     dialog.querySelector("[data-stay]").onclick = () => dialog.close();
     dialog.querySelector("[data-discard]").onclick = async () => {
       dirty = false;
+      profileDraft = null;
+      profileError = "";
       dialog.close();
       try {
         settings = await api("settings");
@@ -1793,7 +2033,7 @@ export async function hostUI(bootstrap) {
     dialog.querySelector("[data-save]").onclick = async () => {
       const gen = generation;
       dialog.close();
-      const form = document.querySelector("#meeting-form");
+      const form = document.querySelector("#meeting-form, #profile-form");
       if (form?.onsubmit) await form.onsubmit(new Event("submit", { cancelable: true }));
       if (gen === generation && !dirty) action();
     };
@@ -1851,6 +2091,16 @@ export async function hostUI(bootstrap) {
       e.returnValue = "";
     }
   });
+  followSystemTheme();
+  // Crossing the phone width changes what Settings shows first: the list, or its first page.
+  try {
+    matchMedia("(max-width: 720px)").addEventListener("change", () => {
+      if (section !== "Settings" || dirty) return;
+      history.replaceState(null, "", hashFor("Settings"));
+      render();
+    });
+  } catch {
+  }
   // Paint the Studio frame now; the first reads fill it in.
   render();
   await load({ first: true });

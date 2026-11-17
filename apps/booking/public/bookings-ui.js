@@ -28,7 +28,7 @@ function placeOf(b) {
 }
 
 /** fmt(ms, options) formats in the Studio time zone; zone labels the header. */
-export function bookingsMarkup({ bookings, view = 'home', query = '', searching = false, fmt, zoneName, now = Date.now(), canDecide = false, deciding = {}, loading = false, setup = '', notices = '' }) {
+export function bookingsMarkup({ bookings, view = 'home', query = '', searching = false, fmt, zoneName, now = Date.now(), canDecide = false, deciding = {}, loading = false, setup = '', notices = '', stats = false }) {
   const time = ms => fmt(ms, { hour: '2-digit', minute: '2-digit', hour12: false });
   const dayKey = ms => fmt(ms, { year: 'numeric', month: '2-digit', day: '2-digit' });
   const today = dayKey(now), tomorrow = dayKey(now + DAY);
@@ -63,7 +63,7 @@ export function bookingsMarkup({ bookings, view = 'home', query = '', searching 
   const requests = bookings.filter(b => isRequest(b) && matches(b)).sort((a, b) => (a.approvalExpiresAt ?? a.start) - (b.approvalExpiresAt ?? b.start));
   const upcoming = bookings.filter(b => isUpcoming(b, now) && matches(b)).sort((a, b) => a.start - b.start);
   const pastCount = bookings.filter(b => isPast(b, now)).length, cancelledCount = bookings.filter(isCancelled).length;
-  return `${head}${notices}${setup}${requests.length ? `<section aria-label="Waiting for your OK"><h2 class="bk-section">Waiting for your OK</h2><div class="card bk-card req">${requests.map(b => row(b, { request: true })).join('')}</div></section>` : ''}<section class="bk-list" aria-label="Upcoming bookings">${upcoming.length ? byDay(upcoming) : `<p class="bk-empty">${q ? 'No matches.' : 'No upcoming bookings.'}</p>`}</section><p class="bk-more"><button type="button" class="link-button" data-bookings-view="past">Past${pastCount ? ` (${pastCount})` : ''}</button> · <button type="button" class="link-button" data-bookings-view="cancelled">Cancelled${cancelledCount ? ` (${cancelledCount})` : ''}</button></p>`;
+  return `${head}${notices}${setup}${requests.length ? `<section aria-label="Waiting for your OK"><h2 class="bk-section">Waiting for your OK</h2><div class="card bk-card req">${requests.map(b => row(b, { request: true })).join('')}</div></section>` : ''}<section class="bk-list" aria-label="Upcoming bookings">${upcoming.length ? byDay(upcoming) : `<p class="bk-empty">${q ? 'No matches.' : 'No upcoming bookings.'}</p>`}</section><p class="bk-more"><button type="button" class="link-button" data-bookings-view="past">Past${pastCount ? ` (${pastCount})` : ''}</button> · <button type="button" class="link-button" data-bookings-view="cancelled">Cancelled${cancelledCount ? ` (${cancelledCount})` : ''}</button>${stats ? ' · <button type="button" class="link-button" data-section="Analytics">Stats</button>' : ''}</p>`;
 }
 
 /** The three-step setup card shown until the first link is shared. */

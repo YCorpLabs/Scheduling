@@ -26,7 +26,7 @@ accepted by Cloudflare Email Sending or Resend.
 | File-level snapshot/restore drill | Same file plus `tests/operations.test.mjs`: copy of SQLite state restored into a fresh runtime/ledger; guest capability still valid; wrong key refuses to send and reports `delivery_overdue` |
 | Cloudflare point-in-time recovery (PITR) | **Not tested.** PITR is unsupported in local workerd (it returns an all-zero bookmark, which status reports as `null`). No production restore has been run. |
 | Restore bookmark RPC/route | **Not implemented.** Needs a reviewed one-off deployment (see below). The fence removes the need for that build to run quarantine itself. |
-| Status UI | Studio's Troubleshooting view (`/studio#status`, below the account controls) shows issues, counts, the fence state and parked emails, and records delivered/not-sent outcomes with an explicit provider-check confirmation (`tests/scheduling-quality-browser.spec.js`, mocked APIs). Freeze, resume and release stay JSON-only. Booking email activity labels resolved receipts as **Marked delivered** / **Marked not sent**, explaining that they are operator assertions rather than independently verified delivery. |
+| Status UI | Studio's Troubleshooting view (`/studio#status`, opened from the attention banner on Bookings) shows issues, counts, the fence state and parked emails, and records delivered/not-sent outcomes with an explicit provider-check confirmation (`tests/scheduling-quality-browser.spec.js`, mocked APIs). Freeze, resume and release stay JSON-only. Booking email activity labels resolved receipts as **Marked delivered** / **Marked not sent**, explaining that they are operator assertions rather than independently verified delivery. |
 
 Run the drills:
 
@@ -438,7 +438,7 @@ fail, so the tests depend on the gate rather than on incidental behavior.
 
 ## Self-service account deletion
 
-Studio → account menu → Manage account → Delete account opens a read-only impact
+Studio → Settings → Sign-in & data → Delete your account opens a read-only impact
 check and offers Export data before confirmation. Opening this dialog does not
 start deletion. An accepted confirmation closes browser and desktop access
 immediately. Old/revoked credentials continue to return HTTP 401; the separate

@@ -74,7 +74,7 @@ test('calendar controls fit a phone and remain readable in dark mode',async({pag
  await setup(page);await page.setViewportSize({width:390,height:844});
  await expect(panel(page)).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/calendar-connections-mobile.png`,fullPage:true});
- await page.getByRole('navigation',{name:'Sections'}).getByRole('button',{name:'More'}).click();await page.getByRole('button',{name:'Dark mode',exact:true}).click();
+ await page.evaluate(()=>localStorage.setItem('scheduling-theme','dark'));await page.reload();await expect(panel(page)).toBeVisible();
  await expect(page.locator('html')).toHaveAttribute('data-theme','dark');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await expect(destination(page,'riley@company.test')).toHaveValue('work');await expect(busy(page,'Work')).toBeChecked();
  const colors=await busy(page,'Personal').locator('xpath=..').evaluate(label=>{const s=getComputedStyle(label);return [s.color,getComputedStyle(document.body).backgroundColor];});expect(colors[0]).not.toBe(colors[1]);

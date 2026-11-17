@@ -43,15 +43,30 @@ async function open(page,hash='',opts){
 }
 const sidebar=page=>page.getByRole('navigation',{name:'Scheduling'});
 
-test('navigation is Bookings, Links, Availability, Activity, then Setup; Bookings is the default page',async({page})=>{
+test('navigation is Bookings, Links and Availability; Settings and the account sit at the bottom; Bookings is the default page',async({page})=>{
  await open(page);
  await expect(page.getByRole('heading',{name:'Bookings',level:1})).toBeVisible();
- await expect(sidebar(page).getByRole('button')).toHaveText([/^Bookings\s*1$/,'Links','Availability','Activity','Integrations']);
- await expect(page.locator('.nav-group')).toHaveText('Setup');
- for(const gone of ['Hours','Calendars','Booking stats','Troubleshooting'])await expect(sidebar(page).getByRole('button',{name:gone,exact:true})).toHaveCount(0);
- await page.locator('#account-trigger').click();
- await expect(page.getByRole('button',{name:'Troubleshooting'})).toBeVisible();
- await expect(page.getByRole('button',{name:'Calendar access'})).toHaveCount(0);
+ await expect(sidebar(page).getByRole('button')).toHaveText([/^Bookings\s*1$/,'Links','Availability']);
+ for(const gone of ['Activity','Integrations','Hours','Calendars','Booking stats','Troubleshooting','Team'])await expect(page.locator('.host-nav').getByRole('button',{name:gone,exact:true})).toHaveCount(0);
+ await expect(page.locator('.nav-group')).toHaveCount(0);
+ // Every row is 32px and starts its label 24px from the edge; Settings sits right above the account row.
+ const rows=await page.locator('.host-nav .sb-row, .host-nav .workspace-trigger').evaluateAll(els=>els.map(e=>{const r=e.getBoundingClientRect();return {h:r.height,pad:parseFloat(getComputedStyle(e).paddingLeft)+r.left};}));
+ for(const row of rows)expect(row).toEqual({h:32,pad:24});
+ const settings=await page.locator('.host-nav [data-section=Settings]').boundingBox(),account=await page.locator('#account-trigger').boundingBox();
+ expect(settings.y+settings.height).toBe(account.y);expect((await page.locator('.host-nav').boundingBox()).width).toBe(240);
+ // Settings swaps the sidebar to Back and the Settings pages; the heading names the page and there are no tabs.
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ const pages=page.getByRole('navigation',{name:'Settings'});
+ await expect(pages.getByRole('button')).toHaveText(['Profile','Connected apps','Notifications','Sign-in & data']);
+ await expect(page.getByRole('heading',{level:1})).toHaveText('Profile');await expect(page).toHaveURL(/#settings\/profile$/);await expect(page.getByRole('tab')).toHaveCount(0);
+ for(const [name,heading] of [['Connected apps','Connected apps'],['Notifications','Notifications'],['Sign-in & data','Sign-in & data']]){await pages.getByRole('button',{name,exact:true}).click();await expect(page.getByRole('heading',{level:1})).toHaveText(heading);await expect(pages.getByRole('button',{name,exact:true})).toHaveAttribute('aria-current','page');}
+ await page.getByRole('button',{name:'Back',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Bookings',level:1})).toBeVisible();await expect(sidebar(page).getByRole('button',{name:/^Bookings/})).toHaveAttribute('aria-current','page');
+ // Stats stays one click away in the Links header; the old addresses still open their new homes.
+ await sidebar(page).getByRole('button',{name:'Links',exact:true}).click();await page.locator('#main .host-heading').getByRole('button',{name:'Stats',exact:true}).click();await expect(page.getByRole('heading',{name:'Stats',level:1})).toBeVisible();
+ await page.goto('about:blank');await page.goto(base+'/studio#activity');await expect(page.getByRole('heading',{name:'Connected apps',level:1})).toBeVisible();
+ await page.goto('about:blank');await page.goto(base+'/studio#integrations');await expect(page.getByRole('heading',{name:'Notifications',level:1})).toBeVisible();
+ await page.goto('about:blank');await page.goto(base+'/studio#status');await expect(page.getByRole('heading',{name:'Troubleshooting',level:1})).toBeVisible();await expect(page.getByRole('button',{name:'← Bookings',exact:true})).toBeVisible();
 });
 
 test('bookings: requests on top with Approve and Decline, Join today, ••• menu, past and cancelled',async({page})=>{
@@ -234,22 +249,24 @@ test('first run: Continue with Google, hours pre-filled Mon–Fri 9–5, then Yo
  await expect(steps.getByRole('button',{name:'Copy link'})).toBeVisible();
 });
 
-test('phone: bottom tab bar instead of the sidebar, More holds setup and account, no sideways scroll',async({page})=>{
+test('phone: bottom tab bar with Settings, Settings as a list, each page with ‹ Settings, no sideways scroll',async({page})=>{
  await page.setViewportSize({width:390,height:844});
  await open(page);
  const tabs=page.getByRole('navigation',{name:'Sections'});
  await expect(tabs).toBeVisible();
- await expect(tabs.getByRole('button')).toHaveText([/Bookings/,'Links','Availability','More']);
+ await expect(tabs.getByRole('button')).toHaveText([/Bookings/,'Links','Availability','Settings']);
  await expect(sidebar(page)).toBeHidden();
  await expect(page.locator('#account-trigger')).toBeHidden();
  const heading=await page.getByRole('heading',{name:'Bookings',level:1}).boundingBox();
  expect(heading.y).toBeLessThan(140);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await tabs.getByRole('button',{name:'More'}).click();
- await expect(page.locator('#account-menu').getByRole('button',{name:'Integrations'})).toBeVisible();
- await expect(page.locator('#account-menu').getByRole('button',{name:'Stats'})).toBeVisible();
- await page.locator('#account-menu').getByRole('button',{name:'Integrations'}).click();
- await expect(page.getByRole('heading',{name:'Integrations',level:1})).toBeVisible();
+ await tabs.getByRole('button',{name:'Settings'}).click();
+ await expect(page.getByRole('heading',{name:'Settings',level:1})).toBeVisible();await expect(tabs.getByRole('button',{name:'Settings'})).toHaveAttribute('aria-current','page');
+ const list=page.locator('.st-list-row');await expect(list).toHaveCount(4);
+ await expect(list.nth(0)).toContainText('Profile');await expect(list.nth(0)).toContainText('Riley Park');await expect(list.nth(3)).toContainText('riley@example.com');
+ await list.filter({hasText:'Notifications'}).click();
+ await expect(page.getByRole('heading',{name:'Notifications',level:1})).toBeVisible();
+ await page.getByRole('button',{name:'Settings',exact:true}).first().click();await expect(page.getByRole('heading',{name:'Settings',level:1})).toBeVisible();
  await tabs.getByRole('button',{name:'Availability'}).click();
  await expect(page.locator('[data-week]')).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

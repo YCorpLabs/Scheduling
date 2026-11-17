@@ -25,19 +25,26 @@ async function studio(page,brand,workspaces){
  await page.route('**/api/**',route=>{const path=new URL(route.request().url()).pathname;let data={revision:'A'.repeat(43),profile:{name:'Riley Quinn'},accounts:[],meetingTypes:[{...DEFAULT,id:'intro',slug:'intro',title:'Intro'}]};if(path==='/api/bootstrap')data={mode:'live',authenticated:true,email:'riley@company.test',hostId:host,...(brand?{brand}:{})};if(path==='/api/live/workspaces')return workspaces?route.fulfill({json:workspaces}):route.fulfill({status:404,json:{error:'Unsupported'}});if(path==='/api/live/calendars')data={accounts:[]};if(path==='/api/live/sessions')data={sessions:[]};if(path==='/api/live/operations')data={generatedAt:Date.now(),issues:[]};return route.fulfill({json:data});});
  await page.goto(base+'/studio#link=intro');await expect(page.locator('#account-trigger')).toBeVisible();
 }
+// The sidebar's top row is the team switcher; without one (older APIs) it names the product.
 test('Studio wordmark and tab title are neutral without configuration',async({page})=>{
- await studio(page);await expect(page.locator('.host-brand .wordmark')).toHaveText('s.Scheduling');await expect(page).toHaveTitle(/ · Scheduling$/);
+ await studio(page);await expect(page.locator('.host-brand .sb-brand')).toHaveText('s.Scheduling');await expect(page).toHaveTitle(/ · Scheduling$/);
 });
 test('Studio wordmark and tab title follow the configured product and brand',async({page})=>{
- await studio(page,{productName:'Rota',brandName:'Acme',privacyUrl:'https://acme.example.com/privacy'});await expect(page.locator('.host-legal').getByRole('link',{name:'Privacy',exact:true})).toHaveAttribute('href','https://acme.example.com/privacy');await expect(page.locator('.host-brand .wordmark')).toHaveText('a.Rota');await expect(page).toHaveTitle(/ · Acme Rota$/);
+ await studio(page,{productName:'Rota',brandName:'Acme',privacyUrl:'https://acme.example.com/privacy'});await expect(page.locator('.host-brand .sb-brand')).toHaveText('a.Rota');await expect(page).toHaveTitle(/ · Acme Rota$/);
+ // Operator links moved from under the account row to Settings → Sign-in & data.
+ await expect(page.locator('.host-nav').getByRole('link',{name:'Privacy'})).toHaveCount(0);
+ await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Sign-in & data'}).click();
+ await expect(page.locator('.st-legal').getByRole('link',{name:'Privacy',exact:true})).toHaveAttribute('href','https://acme.example.com/privacy');
 });
-test('a long product name wraps beside the workspace switcher without overflow',async({page})=>{
- const caps=Object.fromEntries(['readBookings','readAnalytics','approveBookings','manageSettings','manageCalendars','manageMembers','manageIntegrations','manageOperations','transferOwnership','grantAdmin'].map(k=>[k,true]));
- const workspaces={workspaces:[{id:host,name:'Personal',role:'owner',personal:true,capabilities:caps},{id:'h_acmeacmeacmeacmeacmeacme',name:'Acme',role:'admin',personal:false,capabilities:caps}],activeWorkspaceId:host};
- await studio(page,{productName:'Scheduling by Acme Labs'},workspaces);const wordmark=page.locator('.host-brand .wordmark');await expect(wordmark).toHaveText('s.Scheduling by Acme Labs');await expect(page.locator('.workspace-switch')).toBeVisible();
+test('a long product name stays inside the sidebar, and a team switcher takes its place when there is one',async({page})=>{
+ await studio(page,{productName:'Scheduling by Acme Labs and Friends'});const row=page.locator('.host-brand .sb-brand');await expect(row).toHaveText('s.Scheduling by Acme Labs and Friends');
  for(const width of [1440,390,320]){
   await page.setViewportSize({width,height:844});
-  const fit=await page.evaluate(()=>{const box=s=>document.querySelector(s).getBoundingClientRect(),w=box('.host-brand .wordmark'),sw=box('.workspace-switch'),nav=box('.host-nav');return {page:document.documentElement.scrollWidth<=innerWidth,inside:w.left>=nav.left&&w.right<=nav.right+1,apart:w.right<=sw.left+1||w.bottom<=sw.top+1};});
-  expect(fit,`width ${width}`).toEqual({page:true,inside:true,apart:true});
+  const fit=await page.evaluate(()=>{const w=document.querySelector('.host-brand .sb-brand').getBoundingClientRect(),nav=document.querySelector('.host-nav').getBoundingClientRect();return {page:document.documentElement.scrollWidth<=innerWidth,inside:w.left>=nav.left&&w.right<=nav.right+1};});
+  expect(fit,`width ${width}`).toEqual({page:true,inside:true});
  }
+ const caps=Object.fromEntries(['readBookings','readAnalytics','approveBookings','manageSettings','manageCalendars','manageMembers','manageIntegrations','manageOperations','transferOwnership','grantAdmin'].map(k=>[k,true]));
+ const workspaces={workspaces:[{id:host,name:'Personal',role:'owner',personal:true,capabilities:caps},{id:'h_acmeacmeacmeacmeacmeacme',name:'Acme',role:'admin',personal:false,capabilities:caps}],activeWorkspaceId:host};
+ await page.unrouteAll();await page.goto('about:blank');await page.setViewportSize({width:1440,height:844});await studio(page,{productName:'Scheduling by Acme Labs'},workspaces);
+ await expect(page.locator('.workspace-switch')).toBeVisible();await expect(page.locator('.host-brand .sb-brand')).toHaveCount(0);await expect(page).toHaveTitle(/ · Scheduling by Acme Labs$/);
 });

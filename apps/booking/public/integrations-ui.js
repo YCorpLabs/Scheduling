@@ -6,9 +6,9 @@ import {showRowMenu} from './bookings-ui.js';
 
 export const webhookHostsReady=data=>!!(data?.status?.customWebhookHostsConfigured??data?.customWebhookHostsConfigured);
 export const KINDS={
-  slack:{label:'Slack',url:'Slack webhook URL',placeholder:'https://hooks.slack.com/services/…',blurb:'Post booking updates to a channel.',help:'https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/',helpLabel:'Create an incoming webhook in Slack'},
-  discord:{label:'Discord',url:'Discord webhook URL',placeholder:'https://discord.com/api/webhooks/…',blurb:'Post booking updates to a server channel.',help:'https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks',helpLabel:'Create a webhook in Discord'},
-  webhook:{label:'Webhook',url:'Endpoint URL',placeholder:'https://example.com/hooks/scheduling',blurb:'Send signed booking events to your app.'}
+  slack:{label:'Slack',url:'Slack webhook URL',placeholder:'https://hooks.slack.com/services/…',blurb:'Post to a channel',help:'https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/',helpLabel:'Create an incoming webhook in Slack'},
+  discord:{label:'Discord',url:'Discord webhook URL',placeholder:'https://discord.com/api/webhooks/…',blurb:'Post to a server channel',help:'https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks',helpLabel:'Create a webhook in Discord'},
+  webhook:{label:'Webhook',url:'Endpoint URL',placeholder:'https://example.com/hooks/scheduling',blurb:'Send signed events to your app'}
 };
 const ORDER=['slack','discord','webhook'];
 const LOGOS={
@@ -104,28 +104,26 @@ export function integrationHealth(id,deliveries=[]){
   if(last.state==='retry')return {tone:'retry',label:'Retrying',text:`Retrying${last.errorCode?`: ${errorLabel(last.errorCode)}`:''}`};
   return null;
 }
-// Rows follow the Links page: a title, one muted line, a pill only when something is unusual, at most
-// one action, and the rest in the ••• menu.
+// Rows follow Settings: a tile, the name with one muted line, and one control. The name opens
+// the editor; the chevron opens the row's menu (test, edit, turn on or off, remove).
+const CHEVRON='<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><path d="M7.5 4.5 13 10l-5.5 5.5"/></svg>';
+const tile=kind=>`<span class="st-tile st-tile-mark integration-mark kind-${esc(kind)}" aria-hidden="true">${LOGOS[kind]||''}</span>`;
 function integrationRow(i,catalog,deliveries){
   const k=KINDS[i.kind],id=esc(i.id),name=esc(i.name),metaId=`integration-meta-${id}`,health=i.enabled?integrationHealth(i.id,deliveries):null;
-  const meta=[k?.label||i.kind,i.kind==='webhook'?i.destinationLabel:'',eventSummary(i.events,catalog),i.includeGuestDetails?'Shares guest details':''].filter(Boolean).map(esc).join(' · ');
-  const pill=!i.enabled?'<span class="pill off">Off</span>':health?`<span class="pill ${health.tone==='failed'?'bad':'warn'}">${esc(health.label)}</span>`:'';
-  const problem=health?`<span class="integration-problem">${esc(health.text.replace(/^(Last delivery (failed|held)|Retrying): /,''))}</span>`:'';
-  const action=!i.enabled?`<button type="button" class="secondary compact-button lk-copy" data-toggle-integration="${id}" aria-label="Turn on ${name}">Turn on</button>`
-    :health?`<button type="button" class="secondary compact-button lk-copy" data-test-integration="${id}" aria-label="Send test notification to ${name}">Send test</button>`:'<span class="lk-copy"></span>';
-  return `<div class="lk-row integration-row${i.enabled?'':' off'}">${kindMark(i.kind,'row')}<button type="button" class="lk-main" data-edit-integration="${id}" aria-label="Edit ${name}" aria-describedby="${metaId}"><span class="lk-title">${name}${pill?` ${pill}`:''}</span><span class="lk-meta" id="${metaId}">${meta}</span>${problem}</button>${action}<button type="button" class="row-menu" data-integration-menu="${id}" aria-label="More for ${name}" aria-haspopup="menu" aria-expanded="false">•••</button></div>`;
+  const meta=health?[health.label,health.text.replace(/^(Last delivery (failed|held)|Retrying): /,'')].filter(Boolean).join(' · '):[i.enabled?'':'Off',k?.label||i.kind,i.kind==='webhook'?i.destinationLabel:'',eventSummary(i.events,catalog),i.includeGuestDetails?'Shares guest details':''].filter(Boolean).join(' · ');
+  return `<div class="st-row integration-row${i.enabled?'':' off'}${health?' has-problem':''}">${tile(i.kind)}<button type="button" class="st-text st-text-button" data-edit-integration="${id}" aria-label="Edit ${name}" aria-describedby="${metaId}"><span class="st-name">${name}</span><span class="st-line${health?' st-line-problem':''}" id="${metaId}">${esc(meta)}</span></button><button type="button" class="st-chev-button" data-integration-menu="${id}" aria-label="More for ${name}" aria-haspopup="menu" aria-expanded="false">${CHEVRON}</button></div>`;
 }
-// With nothing connected, the same card lists what can be connected.
+// With nothing connected, the same list offers what can be connected.
 function choiceRow(kind,{hostsReady,full}){
   const k=KINDS[kind],unavailable=kind==='webhook'&&!hostsReady;
-  const action=unavailable?'<span class="integration-unavailable">Not available on this service</span>':full?'<span class="lk-copy"></span>':`<button type="button" class="secondary compact-button lk-copy" data-add-integration data-kind="${kind}" aria-label="Connect ${k.label}">Connect</button>`;
-  return `<div class="lk-row integration-row integration-choice${unavailable?' off is-unavailable':''}" data-choice="${kind}">${kindMark(kind,'row')}<div class="lk-main"><span class="lk-title">${k.label}</span><span class="lk-meta">${k.blurb}</span></div>${action}</div>`;
+  const action=unavailable||full?'':`<button type="button" class="st-pill" data-add-integration data-kind="${kind}" aria-label="Connect ${k.label}">Connect</button>`;
+  return `<div class="st-row integration-row integration-choice${unavailable?' off is-unavailable':''}" data-choice="${kind}">${tile(kind)}<span class="st-text"><span class="st-name">${k.label}</span><span class="st-line">${unavailable?'Not available on this service':k.blurb}</span></span>${action}</div>`;
 }
-// The header action, like "New link" on Links. Hidden while the empty card already offers every choice.
+// The header action. Hidden while the empty list already offers every choice.
 export function integrationsHeading(data){
   const items=data?.integrations||[],limit=n(data?.limits?.integrations);
   if(!items.length||limit&&items.length>=limit)return '';
-  return '<button type="button" class="primary compact-button" id="add-integration" data-add-menu aria-haspopup="menu" aria-expanded="false">Add integration</button>';
+  return '<button type="button" class="st-pill" id="add-integration" data-add-menu aria-haspopup="menu" aria-expanded="false">Add integration</button>';
 }
 function deliveryEntry(d,byId,formatTime){
   const owner=byId.get(d.integrationId),when=d.lastAttemptAt||d.nextAttemptAt,label=esc(eventLabel(d.eventType));
@@ -135,11 +133,11 @@ function deliveryEntry(d,byId,formatTime){
   return `<div class="delivery-entry" role="listitem"><span class="delivery-when">${when?esc(formatTime(when)):'Not sent yet'}</span>${owner?kindMark(owner.kind,'sm'):'<span class="integration-mark sm" aria-hidden="true"></span>'}<span class="delivery-what"><span class="delivery-title"><strong>${label}</strong><span class="delivery-to">${esc(owner?.name||'Removed integration')}</span></span>${detail?`<small class="${tone}">${detail}</small>`:''}</span><span class="booking-badge delivery-state-${esc(d.state)}">${esc(deliveryStateLabel(d.state))}</span>${actions?`<span class="delivery-actions">${actions}</span>`:''}</div>`;
 }
 export function integrationsMarkup(data,{loading,error,formatTime}){
-  if(loading&&!data)return '<div class="team-state" role="status">Loading integrations…</div>';
-  if(!data){return `<div class="team-state"><p class="error" role="alert">${esc(error||'Integrations are unavailable.')}</p><button type="button" class="secondary compact-button" data-integrations-retry>Try again</button></div>`;}
+  if(loading&&!data)return '<p class="st-note" role="status">Loading…</p>';
+  if(!data){return `<p class="st-note error" role="alert">${esc(error||'Notifications are unavailable.')}</p><button type="button" class="st-pill" data-integrations-retry>Try again</button>`;}
   const items=data.integrations||[],byId=new Map(items.map(i=>[i.id,i])),deliveries=data.deliveries||[],catalog=eventCatalog(data);
   const limit=n(data.limits?.integrations),full=!!limit&&items.length>=limit,hostsReady=webhookHostsReady(data);
-  const list=`<div class="card integration-card">${items.length?items.map(i=>integrationRow(i,catalog,deliveries)).join(''):ORDER.map(kind=>choiceRow(kind,{hostsReady,full})).join('')}</div>${full?`<p class="lk-foot">Limit of ${limit} reached</p>`:''}`;
+  const list=`<div class="st-rows integration-card">${items.length?items.map(i=>integrationRow(i,catalog,deliveries)).join(''):ORDER.map(kind=>choiceRow(kind,{hostsReady,full})).join('')}</div>${full?`<p class="st-note">Limit of ${limit} reached</p>`:''}`;
   const held=n(data.status?.summary?.quarantined),failed=n(data.status?.summary?.failed);
   const attention=!!(held||failed||deliveries.some(d=>['failed','retry','quarantined'].includes(d.state))),open=logOpen??attention;
   const trouble=deliveries.filter(d=>['failed','quarantined'].includes(d.state)).length;
@@ -184,7 +182,7 @@ export function bindIntegrations(container,{api,getData,reload,status}){
   const refocus=selector=>requestAnimationFrame(()=>document.querySelector(selector)?.focus());
   const editor=opts=>showIntegrationEditor({configure,getData,reload,status,sendTest:id=>api('integrations/test',{id}),...opts});
   const menuOf=id=>`[data-integration-menu="${CSS.escape(id)}"]`;
-  const toggle=(i,button,label)=>withButton(button,label,async()=>{await configure({action:'update',id:i.id,enabled:!i.enabled});await reload();status(i.enabled?`${i.name} is off`:`${i.name} is on`);refocus(i.enabled?`[data-toggle-integration="${CSS.escape(i.id)}"]`:menuOf(i.id));});
+  const toggle=(i,button,label)=>withButton(button,label,async()=>{await configure({action:'update',id:i.id,enabled:!i.enabled});await reload();status(i.enabled?`${i.name} is off`:`${i.name} is on`);refocus(menuOf(i.id));});
   const runTest=(id,button,label)=>withButton(button,label,async()=>{const name=find(id)?.name||'the destination';const result=await api('integrations/test',{id});await reload();
     status(testStatus(result,name));refocus(document.querySelector(`.integration-alert [data-test-integration="${CSS.escape(id)}"]`)?`.integration-alert [data-test-integration="${CSS.escape(id)}"]`:menuOf(id));if(result?.deliveryId&&PENDING.has(result.state))followTest(result.deliveryId,{getData,reload,status});});
   container.querySelectorAll('[data-test-integration]').forEach(b=>b.onclick=()=>runTest(b.dataset.testIntegration,b,'Sending…'));

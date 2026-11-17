@@ -1,12 +1,48 @@
 import {esc} from './workspace-ui.js';
-export function accountMenuMarkup({name,email,avatar,editProfile=false,editPicture=false,troubleshooting=false,issues=0,dark=false,calendarAccess=false,sections=[]}){return `<div class="host-account account-compact"><button type="button" class="account-trigger host-identity" id="account-trigger" aria-haspopup="dialog" aria-controls="account-menu" aria-expanded="false" aria-label="Account menu" aria-describedby="account-email"><span class="host-avatar">${avatar?`<img src="${esc(avatar)}" alt="">`:esc((name||email||'?').slice(0,1))}</span><span class="account-trigger-name"><strong>${esc(name||email||'Your account')}</strong><small class="sr-only" id="account-email">${esc(email)}</small></span>${issues?`<span class="account-issue-count" aria-label="${issues} issues">${issues}</span>`:''}<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m7 7 3-3 3 3m-6 6 3 3 3-3"/></svg></button><div class="account-popover" id="account-menu" role="dialog" aria-label="Account settings" hidden>${sections.length?`<div class="account-menu-sections">${sections.map(([id,label])=>`<button type="button" data-section="${esc(id)}">${esc(label)}</button>`).join('')}</div>`:''}<div class="account-menu-email">${esc(email)}</div>${editProfile?'<button type="button" data-profile="account">Edit profile</button>':''}${editPicture?'<button type="button" data-profile="avatar" aria-label="Change profile picture">Change picture</button>':''}${calendarAccess?'<button type="button" id="calendar-access">Calendar access</button>':''}<button type="button" id="manage-account">Manage account</button><button type="button" id="host-theme">${dark?'Light mode':'Dark mode'}</button>${troubleshooting?`<button type="button" data-section="Status">Troubleshooting${issues?`<span aria-label="${issues} issues">${issues}</span>`:''}</button>`:''}<div class="account-menu-divider"></div><button type="button" id="sign-out">Sign out</button></div></div>`;}
-export function bindAccountMenu(root){const trigger=root.querySelector('#account-trigger'),menu=root.querySelector('#account-menu');if(!trigger||!menu)return()=>false;const items=()=>[...menu.querySelectorAll('button:not(:disabled)')].filter(b=>b.getClientRects().length),opener=()=>trigger.getClientRects().length?trigger:root.querySelector('[data-more]')||trigger;
- const outside=event=>{if(!menu.contains(event.target)&&!trigger.contains(event.target)&&!event.target.closest?.('[data-more]'))close(false);};
- function position(){if(menu.hidden)return;const rect=trigger.getBoundingClientRect(),width=Math.min(244,innerWidth-24);menu.style.width=width+'px';menu.style.left=Math.max(12,Math.min(rect.left,innerWidth-width-12))+'px';const height=menu.getBoundingClientRect().height;menu.style.top=Math.max(12,Math.min(rect.top>=height+8?rect.top-height-8:rect.bottom+8,innerHeight-height-12))+'px';}
- function close(focus=true){const wasOpen=!menu.hidden;menu.hidden=true;trigger.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);window.removeEventListener('resize',position);if(wasOpen&&focus&&trigger.isConnected)opener().focus();return wasOpen;}
+// The account row at the bottom of the Studio sidebar and its small menu: who is signed in,
+// Theme and Sign out. Everything else about the account lives in Settings.
+
+/** The signed-in person's name: the name on their own profile, else their email. Never a team's name. */
+export function accountName({profileName,email}={}){
+  const clean=value=>typeof value==='string'?value.trim():'';
+  return clean(profileName)||clean(email)||'Your account';
+}
+/** Up to two letters, e.g. "Alex Morgan" → "AM", "alex@fernhill.example" → "A". */
+export function initials(name){
+  const text=String(name||'').trim();if(!text)return '?';
+  if(text.includes('@'))return text[0].toUpperCase();
+  const words=text.split(/\s+/).filter(Boolean);
+  return ((words[0]?.[0]||'')+(words.length>1?words.at(-1)[0]:'')).toUpperCase()||'?';
+}
+
+export const THEMES=[['light','Light'],['dark','Dark'],['auto','Auto']];
+const THEME_KEY='scheduling-theme';
+export function storedTheme(){try{const value=localStorage.getItem(THEME_KEY);return THEMES.some(([id])=>id===value)?value:'light';}catch{return 'light';}}
+const prefersDark=()=>{try{return matchMedia('(prefers-color-scheme: dark)').matches;}catch{return false;}};
+/** Applies the stored choice; Auto follows the system setting. */
+export function applyTheme(choice=storedTheme()){document.documentElement.dataset.theme=choice==='auto'?(prefersDark()?'dark':'light'):choice;return choice;}
+export function setTheme(choice){if(!THEMES.some(([id])=>id===choice))return storedTheme();try{localStorage.setItem(THEME_KEY,choice);}catch{}applyTheme(choice);return choice;}
+let followingSystem=false;
+export function followSystemTheme(){if(followingSystem)return;followingSystem=true;try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(storedTheme()==='auto')applyTheme('auto');});}catch{}}
+/** Light, Dark and Auto as one inline group; used in the menu and on phones in Settings. */
+export function themeChoicesMarkup(labelId){
+  const current=storedTheme();
+  return `<span class="theme-choices" role="group" aria-labelledby="${esc(labelId)}">${THEMES.map(([id,label])=>`<button type="button" data-theme-choice="${id}" aria-pressed="${id===current}">${label}</button>`).join('')}</span>`;
+}
+export function syncThemeChoices(root=document){const current=storedTheme();root.querySelectorAll('[data-theme-choice]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.themeChoice===current)));}
+
+export function accountMenuMarkup({name,email,avatar}){
+  const shown=name||email||'Your account';
+  return `<div class="host-account account-compact"><button type="button" class="account-trigger host-identity" id="account-trigger" aria-haspopup="dialog" aria-controls="account-menu" aria-expanded="false" aria-label="Account menu" aria-describedby="account-email"><span class="host-avatar">${avatar?`<img src="${esc(avatar)}" alt="">`:esc(initials(shown))}</span><span class="account-trigger-name"><strong>${esc(shown)}</strong><small class="sr-only" id="account-email">${esc(email)}</small></span></button><div class="account-popover" id="account-menu" role="dialog" aria-label="Account settings" hidden><div class="account-who"><strong>${esc(shown)}</strong>${email&&email!==shown?`<span>${esc(email)}</span>`:''}</div><div class="account-menu-divider"></div><div class="account-menu-row"><span id="account-theme-label">Theme</span>${themeChoicesMarkup('account-theme-label')}</div><button type="button" id="sign-out" data-sign-out>Sign out</button></div></div>`;
+}
+export function bindAccountMenu(root){const trigger=root.querySelector('#account-trigger'),menu=root.querySelector('#account-menu');if(!trigger||!menu)return()=>false;const items=()=>[...menu.querySelectorAll('button:not(:disabled)')].filter(b=>b.getClientRects().length);
+ const outside=event=>{if(!menu.contains(event.target)&&!trigger.contains(event.target))close(false);};
+ function position(){if(menu.hidden)return;const rect=trigger.getBoundingClientRect(),width=Math.max(200,Math.min(rect.width,innerWidth-24));menu.style.width=width+'px';menu.style.left=Math.max(12,Math.min(rect.left,innerWidth-width-12))+'px';const height=menu.getBoundingClientRect().height;menu.style.top=Math.max(12,Math.min(rect.top>=height+8?rect.top-height-8:rect.bottom+8,innerHeight-height-12))+'px';}
+ function close(focus=true){const wasOpen=!menu.hidden;menu.hidden=true;trigger.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside,true);window.removeEventListener('resize',position);if(wasOpen&&focus&&trigger.isConnected)trigger.focus();return wasOpen;}
  function open(last=false){menu.hidden=false;trigger.setAttribute('aria-expanded','true');position();document.addEventListener('pointerdown',outside,true);window.addEventListener('resize',position);(last?items().at(-1):items()[0])?.focus();}
  trigger.onclick=()=>menu.hidden?open():close();trigger.onkeydown=event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();open(event.key==='ArrowUp');}};
- menu.addEventListener('click',event=>{if(event.target.closest('button'))close();},true);
+ // A theme choice applies in place and keeps the menu open; every other button closes it.
+ menu.addEventListener('click',event=>{const button=event.target.closest('button');if(button&&!button.dataset.themeChoice)close();},true);
  menu.onkeydown=event=>{const list=items(),index=list.indexOf(document.activeElement);let next;if(event.key==='ArrowDown')next=(index+1)%list.length;if(event.key==='ArrowUp')next=(index-1+list.length)%list.length;if(event.key==='Home')next=0;if(event.key==='End')next=list.length-1;if(next!=null){event.preventDefault();list[next]?.focus();}if(event.key==='Escape'||event.key==='Tab'&&(event.shiftKey&&index===0||!event.shiftKey&&index===list.length-1)){event.preventDefault();event.stopPropagation();close();}};
  return()=>close(false);
 }

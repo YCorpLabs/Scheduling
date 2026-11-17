@@ -40,7 +40,7 @@ Each host's Durable Object owns all meeting types and connected-account conflict
 
 - Auth is OAuth 2.1: discovery at `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, dynamic client registration at `/oauth/register`, authorization code with S256 PKCE at `/oauth/authorize` and `/oauth/token`. Nothing new is stored: client IDs and pending requests are sealed with `TOKEN_ENCRYPTION_KEY`, the code is an approved device grant and the access token is a 30-day desktop session with the `booking:manage` scope, so Studio revocation, lifecycle checks and account cleanup apply unchanged.
 - Tools cover bookings (list, approve or decline, cancel, reschedule with free times), links (create, update, delete, free times), availability (weekly hours, date overrides, time zone), integrations (connect, update, remove, test, retry), calendars, analytics and a raw settings patch. Pass `workspace` to act in a company workspace; the Studio's role checks and privacy projections apply.
-- Every change an MCP client makes is recorded with the app's name and shown in the Studio under **Activity**, where connected apps can also be disconnected. Activity is kept for 90 days, at most 500 entries per workspace.
+- Every change an MCP client makes is recorded with the app's name and session. The Studio lists connected apps under **Settings → Connected apps**; each app's page shows its recent changes and can disconnect it. Changes are kept for 90 days, at most 500 entries per workspace.
 
 ## Notifications
 

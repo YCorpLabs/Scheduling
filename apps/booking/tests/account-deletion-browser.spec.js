@@ -22,13 +22,14 @@ async function mock(page,options={}){
   return json({});
  });return state;
 }
-async function open(page){await page.goto(base+'/studio');await page.locator('#account-trigger:visible, [data-more]:visible').first().click();await page.getByRole('button',{name:'Manage account',exact:true}).click();await page.getByRole('button',{name:'Delete account…',exact:true}).click();return page.getByRole('dialog',{name:'Delete account',exact:true});}
+// Settings → Sign-in & data → Your data → Delete your account.
+async function open(page){await page.goto(base+'/studio#settings/account');await page.getByRole('button',{name:'Delete…',exact:true}).click();return page.getByRole('dialog',{name:'Delete account',exact:true});}
 const confirms=state=>state.requests.filter(r=>r.path.endsWith('/deletion/confirm'));
 
 test('deletion is an explicit confirmation with export available first, and Cancel returns focus',async({page})=>{
  const state=await mock(page);let dialog=await open(page);await expect(dialog.getByRole('heading',{name:'Delete your account?'})).toBeVisible();await expect(dialog.getByText('ada@example.test',{exact:true})).toBeVisible();await expect(dialog.getByRole('button',{name:'Cancel',exact:true})).toBeFocused();expect(confirms(state)).toHaveLength(0);
  await dialog.getByRole('button',{name:'Export data',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('link',{name:'Download',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'Delete account…',exact:true}).click();dialog=page.getByRole('dialog',{name:'Delete account',exact:true});await expect(dialog.getByRole('heading',{name:'Delete your account?'})).toBeVisible();await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Delete account…',exact:true})).toBeFocused();expect(confirms(state)).toHaveLength(0);
+ await page.getByRole('button',{name:'Delete…',exact:true}).click();dialog=page.getByRole('dialog',{name:'Delete account',exact:true});await expect(dialog.getByRole('heading',{name:'Delete your account?'})).toBeVisible();await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Delete…',exact:true})).toBeFocused();expect(confirms(state)).toHaveLength(0);
 });
 
 test('owned profiles and bookings block deletion with direct resolution links',async({page})=>{
@@ -66,5 +67,5 @@ test('390px confirmation and pending status fit the viewport and remain keyboard
 
 test('blocked browser storage never submits deletion and still lets the user cancel',async({page})=>{
  await page.addInitScript(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(this===sessionStorage&&key==='scheduling.account-deletion.v1')throw Error('Site storage denied');return original.call(this,key,value);};});
- const state=await mock(page),dialog=await open(page);await dialog.getByRole('button',{name:'Delete account',exact:true}).click();await expect(dialog.getByRole('alert')).toContainText('couldn’t save deletion status');expect(confirms(state)).toHaveLength(0);await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Delete account…',exact:true})).toBeFocused();
+ const state=await mock(page),dialog=await open(page);await dialog.getByRole('button',{name:'Delete account',exact:true}).click();await expect(dialog.getByRole('alert')).toContainText('couldn’t save deletion status');expect(confirms(state)).toHaveLength(0);await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Delete…',exact:true})).toBeFocused();
 });

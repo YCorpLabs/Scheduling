@@ -42,9 +42,9 @@ test.describe('owner status',()=>{
   test('shows issues, counts and parked emails without guest data, and records an outcome by keyboard',async({page})=>{
     const {calls}=await studio(page,{resolve:body=>({json:{ok:true},next:healthy})});
     await expect(page.getByText('2 issues need attention')).toBeVisible();
-    await expect(page.locator('#account-trigger .account-issue-count')).toHaveText('2');
-    await page.locator('#account-trigger').click();
-    await expect(page.getByRole('dialog',{name:'Account settings'}).getByRole('button',{name:/^Troubleshooting/})).toContainText('2');
+    // Troubleshooting opens from the Bookings attention banner and goes back to Bookings; the account menu no longer lists it.
+    await expect(page.getByRole('button',{name:'← Bookings',exact:true})).toBeVisible();
+    await page.locator('#account-trigger').click();await expect(page.getByRole('dialog',{name:'Account settings'}).getByRole('button',{name:/Troubleshooting/})).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('list',{name:'Issues'}).getByRole('listitem')).toHaveCount(2);
     await expect(page.locator('.ops-card').filter({hasText:'Requests to approve'})).toContainText('2');
