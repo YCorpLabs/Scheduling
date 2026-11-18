@@ -29,8 +29,12 @@ const busy=(page,name)=>panel(page).getByRole('checkbox',{name:new RegExp('^'+na
 const toggle=(page,name)=>panel(page).locator('label.av-check').filter({has:page.locator('.av-cal-name',{hasText:new RegExp('^'+name+'$')})}).click();
 const sidebar=page=>page.getByRole('navigation',{name:'Scheduling'});
 const status=page=>page.locator('[data-av-status]');
+// Settings is reached from the name menu at the top of the sidebar.
+async function openSettings(page,name){await page.locator('#account-trigger').click();await page.locator('#account-menu').getByRole('button',{name:'Settings',exact:true}).click();if(name)await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name}).click();}
+// Home (the Bookings section) has your link on top and Upcoming below.
+const expectHome=async page=>{await expect(page.getByRole('heading',{name:'Upcoming',level:2})).toBeVisible();await expect(page).toHaveTitle(/^Home · /);};
 async function calendarAccess(page){
- await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Sign-in & data'}).click();
+ await openSettings(page,'Sign-in & data');
  return page.getByRole('region',{name:'Calendar access'});
 }
 async function stopSharing(page){
@@ -51,7 +55,7 @@ test('member edits one availability, saves own calendar choices in the company, 
  const write=state.requests.find(r=>r.path==='/api/live/my-calendar'&&r.body);expect(write.ws).toBe(company);expect(write.body).toMatchObject({accountId:'mine',calendarId:'primary',expectedRevision:'rev1'});expect(write.body.conflictCalendarIds).toContain('private');
  expect(state.requests.filter(r=>r.path==='/api/live/settings'&&r.body)).toHaveLength(0);
  // Saved as you go: leaving asks nothing.
- await sidebar(page).getByRole('button',{name:/^Bookings/}).click();await expect(page.getByRole('dialog',{name:'Unsaved changes'})).toHaveCount(0);await expect(page.getByRole('heading',{name:'Bookings',level:1})).toBeVisible();
+ await sidebar(page).getByRole('button',{name:/^Home/}).click();await expect(page.getByRole('dialog',{name:'Unsaved changes'})).toHaveCount(0);await expectHome(page);
  await sidebar(page).getByRole('button',{name:'Availability',exact:true}).click();await expect(busy(page,'Private')).toBeChecked();
  const {access,confirm}=await stopSharing(page);await confirm.getByRole('button',{name:'Cancel',exact:true}).click();
  expect(state.requests.filter(r=>r.path.endsWith('/withdraw'))).toHaveLength(0);
@@ -73,7 +77,7 @@ test('a disconnected member is offered calendar setup from Availability; a viewe
  const self=page.locator('.team-row').filter({hasText:'You'});await expect(self).toContainText('Calendar not connected');
  await self.getByRole('button',{name:'Set up my calendar',exact:true}).click();await expect(page.getByRole('heading',{name:'Availability',level:1})).toBeVisible();await expect(connect).toBeVisible();
  await page.unrouteAll({behavior:'ignoreErrors'});await fixture(page,{role:'viewer'});await page.goto('about:blank');await page.goto(base+'/studio#availability');
- await expect(page.getByRole('heading',{name:'Bookings',level:1})).toBeVisible();await expect(sidebar(page).getByRole('button',{name:'Availability',exact:true})).toHaveCount(0);
+ await expectHome(page);await expect(sidebar(page).getByRole('button',{name:'Availability',exact:true})).toHaveCount(0);
 });
 
 test('admin’s own calendar stays private to them, draft preview makes no booking calls',async({page})=>{

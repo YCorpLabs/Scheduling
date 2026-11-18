@@ -14,6 +14,8 @@ async function routes(page,handler){
 function boxesOverlap(a,b){return a.x<b.x+b.width&&b.x<a.x+a.width&&a.y<b.y+b.height&&b.y<a.y+a.height;}
 const noSideways=page=>expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 const sidebar=page=>page.getByRole('navigation',{name:'Scheduling'});
+// Settings is reached from the name menu at the top of the sidebar.
+async function openSettings(page,name){await page.locator('#account-trigger').click();await page.locator('#account-menu').getByRole('button',{name:'Settings',exact:true}).click();if(name)await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name}).click();}
 
 test('a rejected Google grant shows one reconnect action instead of a raw provider error',async({page})=>{
  await routes(page,(path,body,json)=>{
@@ -105,7 +107,7 @@ test('Availability shows reconnect needed while keeping the member’s hours and
  }
  await page.setViewportSize({width:1280,height:800});
  // Stop sharing stays available in Settings → Sign-in & data → Calendar access.
- await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('navigation',{name:'Settings'}).getByRole('button',{name:'Sign-in & data'}).click();
+ await openSettings(page,'Sign-in & data');
  const access=page.getByRole('region',{name:'Calendar access'});await expect(access.getByRole('button',{name:'Stop sharing ada.lovelace.with-a-long-address@example.com with Acme',exact:true})).toBeVisible();
  await noSideways(page);await page.getByRole('button',{name:'Back',exact:true}).click();
  // The Team page shows the same state for the member.

@@ -88,7 +88,8 @@ test('Sign-in & data lists browsers inline with laptop or phone tiles and the da
   assert.match(page,/<h2 id="browsers-title">Browsers<\/h2>[^]*data-revoke-others>Sign out other browsers</);
   assert.match(page,/<h2 id="calendar-access-title">Calendar access<\/h2>[^]*data-withdraw="0" aria-label="Stop sharing alex@fernhill\.example with Fernhill">Stop sharing</);
   assert.match(page,/<h2 id="your-data-title">Your data<\/h2><div class="st-rows"><div class="st-row" data-account-export><\/div>[^]*Delete your account[^]*Your Google Calendar events stay[^]*class="st-pill red" data-delete-account>Delete…</);
-  assert.match(page,/st-phone-only[^]*data-theme-choice="auto"[^]*data-sign-out>Sign out</);
+  // Theme is on every screen size (it left the name menu); the extra Sign out is for phones.
+  assert.match(page,/data-theme-choice="auto"[^]*st-phone-only[^]*data-sign-out>Sign out</);
   assert.doesNotMatch(accountPageMarkup({email:'a@b.example',head:'',status:'',sessions:[]}),/Calendar access/);
 });
 

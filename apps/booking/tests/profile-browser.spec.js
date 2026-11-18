@@ -20,7 +20,9 @@ async function crop(page,label,kind,{cancel=false}={}){
  await dialog.getByLabel('Zoom',{exact:true}).focus();await page.keyboard.press('End');await dialog.getByLabel('Horizontal position',{exact:true}).focus();await page.keyboard.press('End');expect(await dialog.locator('canvas').evaluate(canvas=>canvas.getContext('2d').getImageData(0,0,1,1).data[0])).toBeLessThan(120);
  await dialog.getByRole('button',{name:'Use image',exact:true}).click();await expect(dialog).toHaveCount(0);
 }
-const openProfile=async page=>{await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();};
+// Settings opens from the name menu at the top of the sidebar (on phones, at the top of the screen).
+const openMenu=async page=>{await page.locator('#account-trigger').click();const menu=page.getByRole('dialog',{name:'Account',exact:true});await expect(menu).toBeVisible();return menu;};
+const openProfile=async page=>{await (await openMenu(page)).getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();};
 
 test('profile edits photo, banner, name and company with a live preview and saves once',async({page})=>{
  const state=await setup(page);await openProfile(page);
@@ -33,7 +35,7 @@ test('profile edits photo, banner, name and company with a live preview and save
  await expect(page.getByRole('button',{name:'Remove photo',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Change banner',exact:true})).toBeVisible();expect(state.writes).toHaveLength(0);
  await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.locator('#host-status')).toHaveText('Saved');
  expect(state.writes).toHaveLength(1);expect(Object.keys(state.writes[0].patch.profile).sort()).toEqual(['avatarImage','bannerImage','company','name']);expect(state.profile).toMatchObject({name:'Ada Morgan',company:'Fernhill'});
- await expect(page.locator('#account-trigger')).toContainText('Ada Morgan');await expect(page.locator('#account-trigger .host-avatar img')).toBeVisible();
+ await page.getByRole('button',{name:'Back',exact:true}).click();await expect(page.locator('#account-trigger')).toContainText('Ada Morgan');await expect(page.locator('#account-trigger .host-avatar img')).toBeVisible();await page.getByRole('navigation',{name:'Scheduling'}).getByRole('button',{name:'Links',exact:true}).click();await page.locator('[data-type]').first().click();await openProfile(page);
  await page.screenshot({path:`${process.env.BOOKING_SCREENSHOT_DIR||'test-results'}/scheduling-profile-desktop.png`,fullPage:true});
 });
 
@@ -51,8 +53,8 @@ test('cancelled crops change nothing; removal needs Save; leaving with unsaved e
 });
 
 test('a save conflict keeps the edits, and Profile fits a phone with ‹ Settings',async({page})=>{
- await page.setViewportSize({width:360,height:780});await setup(page);await expect(page.locator('#account-trigger')).toBeHidden();
- await page.getByRole('navigation',{name:'Sections'}).getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:/^Profile/}).click();await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();
+ await page.setViewportSize({width:360,height:780});await setup(page);await expect(page.locator('#account-trigger')).toBeVisible();await expect(page.getByRole('navigation',{name:'Sections'}).getByRole('button',{name:'Settings',exact:true})).toHaveCount(0);
+ await (await openMenu(page)).getByRole('button',{name:'Settings',exact:true}).click();await page.getByRole('button',{name:/^Profile/}).click();await expect(page.getByRole('heading',{name:'Profile',level:1})).toBeVisible();
  await crop(page,'Add banner','banner');
  await page.route('**/api/live/settings',route=>route.request().method()==='POST'?route.fulfill({status:409,json:{error:'Settings changed. Reload before saving.',code:'settings_conflict'}}):route.fulfill({json:{revision:'Z'.repeat(43),profile:{name:'Ada Lind',avatarImage:null,bannerImage:null},accounts:[],meetingTypes:[]}}));
  await page.getByRole('button',{name:'Save',exact:true}).click();await expect(page.getByRole('alert')).toContainText('Your profile changed elsewhere. Your edits are still here.');await expect(page.locator('.pf-banner img')).toBeVisible();

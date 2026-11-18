@@ -55,50 +55,70 @@ async function mock(page,{role='admin',companies=true,authenticated=true,email='
   });
   return state;
 }
-const switcher=page=>page.locator('#workspace-trigger');
+// The name menu at the top of the sidebar: its button names the open profile (the person, or the team),
+// and it holds the profiles ("Switch to", only with more than one), Settings and Sign out.
+const switcher=page=>page.locator('#account-trigger');
 const nav=page=>page.getByRole('navigation',{name:'Scheduling'});
+const accountMenu=page=>page.getByRole('dialog',{name:'Account',exact:true});
+const profiles=page=>accountMenu(page).getByRole('group',{name:'Switch to'}).getByRole('button');
+async function openMenu(page){if(!await accountMenu(page).isVisible())await switcher(page).click();await expect(accountMenu(page)).toBeVisible();return accountMenu(page);}
+async function switchTo(page,name){await openMenu(page);await profiles(page).filter({hasText:new RegExp(name)}).click();}
+async function openSettings(page,name){const pages=page.getByRole('navigation',{name:'Settings'});if(!await pages.isVisible())await (await openMenu(page)).getByRole('button',{name:'Settings',exact:true}).click();if(name){await pages.getByRole('button',{name,exact:true}).click();await expect(page.getByRole('heading',{name,level:1})).toBeVisible();}}
 // Settings → Notifications (the Integrations page before).
-async function notifications(page){const pages=page.getByRole('navigation',{name:'Settings'});if(!await pages.isVisible())await page.getByRole('button',{name:'Settings',exact:true}).click();await pages.getByRole('button',{name:'Notifications',exact:true}).click();await expect(page.getByRole('heading',{name:'Notifications',level:1})).toBeVisible();}
-async function switchTo(page,name){await switcher(page).click();await page.getByRole('menuitemradio',{name:new RegExp(name)}).click();}
+const notifications=page=>openSettings(page,'Notifications');
+// Theme and New team live in Settings → Sign-in & data.
+async function setTheme(page,choice){await openSettings(page,'Sign-in & data');await page.getByRole('group',{name:'Theme'}).getByRole('button',{name:choice,exact:true}).click();await expect(page.locator('html')).toHaveAttribute('data-theme',choice.toLowerCase());}
+async function newTeam(page){await openSettings(page,'Sign-in & data');await page.getByRole('button',{name:'New team',exact:true}).click();}
+const upcoming=page=>expect(page.getByRole('heading',{name:'Upcoming',level:2})).toBeVisible();
 
-test('workspace switcher scopes company requests, keeps identity personal and survives reload and theme',async({page})=>{
+test('the name menu switches profile, scopes company requests, keeps identity personal and survives reload and theme',async({page})=>{
   const state=await mock(page);await page.goto(base+'/studio#link=intro');
   await expect(page.locator('#edit-title')).toHaveValue('Personal intro');
   const firstSettings=state.requests.findIndex(r=>r.path==='/api/live/settings'),firstList=state.requests.findIndex(r=>r.path==='/api/live/workspaces');
   expect(firstList).toBeGreaterThan(-1);expect(firstList).toBeLessThan(firstSettings);expect(state.requests[firstSettings].ws).toBeNull();
   await expect(page.getByRole('button',{name:'Team'})).toHaveCount(0);
-  // keyboard: open with ArrowDown, move, Escape returns focus
-  await switcher(page).focus();await page.keyboard.press('ArrowDown');await expect(page.getByRole('menuitemradio',{name:/Ada/})).toBeFocused();await page.keyboard.press('Escape');await expect(switcher(page)).toBeFocused();await expect(page.locator('#workspace-menu')).toBeHidden();
-  await page.keyboard.press('ArrowDown');await page.keyboard.press('ArrowDown');await expect(page.getByRole('menuitemradio',{name:/Acme/})).toBeFocused();await page.keyboard.press('Enter');
+  await expect(switcher(page)).toHaveAccessibleName('Ada, account menu');
+  // keyboard: open with ArrowDown on the active profile, Escape returns focus, move and Enter switches
+  await switcher(page).focus();await page.keyboard.press('ArrowDown');await expect(profiles(page).filter({hasText:'Ada'})).toBeFocused();await expect(profiles(page).filter({hasText:'Ada'})).toHaveAttribute('aria-pressed','true');
+  await page.keyboard.press('Escape');await expect(switcher(page)).toBeFocused();await expect(page.locator('#account-menu')).toBeHidden();
+  await page.keyboard.press('ArrowDown');await page.keyboard.press('ArrowDown');await expect(profiles(page).filter({hasText:'Acme'})).toBeFocused();await page.keyboard.press('Enter');
   await expect(page.locator('#edit-title')).toHaveValue('Acme demo');await expect(switcher(page)).toBeFocused();
   expect(state.requests.filter(r=>r.path==='/api/live/settings').at(-1).ws).toBe('h_acmeacmeacmeacmeacmeacme');
   expect(state.requests.filter(r=>r.path==='/api/live/workspaces').every(r=>r.ws===null)).toBeTruthy();
-  await expect(page.locator('.host-identity small')).toHaveText('ada@example.com');await expect(page.locator('.host-identity strong')).toHaveText('Ada');
-  await expect(nav(page).getByRole('button')).toHaveText(['Bookings','Links','Availability','Team']);await expect(page.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
+  // The button names the team; the person stays the signed-in identity inside the menu.
+  await expect(switcher(page).locator('strong')).toHaveText('Acme');await expect(switcher(page)).toHaveAccessibleName('Acme, account menu');
+  await openMenu(page);await expect(accountMenu(page).locator('.account-who')).toContainText('Ada');await expect(accountMenu(page).locator('.account-who')).toContainText('ada@example.com');
+  await expect(profiles(page)).toHaveText([/Ada/,/Acme/]);await expect(profiles(page).filter({hasText:'Acme'})).toHaveAttribute('aria-pressed','true');await expect(profiles(page).filter({hasText:'Ada'})).toHaveAttribute('aria-pressed','false');
+  await expect(accountMenu(page).getByRole('button',{name:'Settings',exact:true})).toBeVisible();await page.keyboard.press('Escape');
+  await expect(nav(page).getByRole('button')).toHaveText(['Home','Links','Availability','Team']);
   await nav(page).getByRole('button',{name:'Availability',exact:true}).click();await expect(page.locator('a[href^="/auth/google?connect=1&workspace=h_acme"]').first()).toBeVisible();
-  await page.setViewportSize({width:1440,height:960});await nav(page).getByRole('button',{name:'Links',exact:true}).click();await switcher(page).click();await page.screenshot({path:`${shots}/workspace-switcher.png`});await page.keyboard.press('Escape');
+  await page.setViewportSize({width:1440,height:960});await nav(page).getByRole('button',{name:'Links',exact:true}).click();await openMenu(page);await page.screenshot({path:`${shots}/workspace-switcher.png`});await page.keyboard.press('Escape');
   await page.reload();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();
-  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark',exact:true}).click();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();await expect(switcher(page)).toContainText('Acme');
+  await setTheme(page,'Dark');await page.getByRole('button',{name:'Back',exact:true}).click();await expect(switcher(page)).toContainText('Acme');
+  await nav(page).getByRole('button',{name:'Links',exact:true}).click();await expect(page.getByRole('button',{name:'Edit Acme demo',exact:true})).toBeVisible();
 });
 
-test('after a reload in a team the account button still names the signed-in person, never "Your account"',async({page})=>{
+test('after a reload in a team the name menu names the team and, inside, the signed-in person, never "Your account"',async({page})=>{
   await page.addInitScript(()=>localStorage.setItem('scheduling-workspace',JSON.stringify({account:'h_me',id:'h_acmeacmeacmeacmeacmeacme',name:'Acme'})));
   const state=await mock(page);let releasePersonal;
   // Hold the personal profile so the first paint in the team is checked too.
   let held=false;await page.route('**/api/live/settings',async route=>{if(!held&&!route.request().headers()['x-scheduling-workspace']){held=true;await new Promise(resolve=>releasePersonal=resolve);}return route.fallback();});
   await page.goto(base+'/studio');await expect(switcher(page)).toContainText('Acme');
-  const trigger=page.locator('#account-trigger');await expect(trigger).not.toContainText('Your account');await expect(trigger.locator('strong')).toHaveText('ada@example.com');await expect(trigger.locator('.host-avatar')).toHaveText('A');
+  const trigger=switcher(page),who=page.locator('#account-menu .account-who');
+  await expect(trigger).not.toContainText('Your account');await expect(trigger.locator('strong')).toHaveText('Acme');await expect(trigger.locator('.me-mark')).toHaveText('A');
+  await expect(who.locator('strong')).toHaveText('ada@example.com');await expect(who.locator('.host-avatar')).toHaveText('A');await expect(page.locator('#account-menu')).not.toContainText('Your account');
   await expect.poll(()=>!!releasePersonal).toBe(true);releasePersonal();
-  await expect(trigger.locator('strong')).toHaveText('Ada');await expect(trigger.locator('.host-avatar')).toHaveText('A');
+  await expect(who.locator('strong')).toHaveText('Ada');await expect(who.locator('.host-avatar')).toHaveText('A');await expect(trigger.locator('strong')).toHaveText('Acme');
   expect(state.requests.filter(r=>r.path==='/api/live/settings').map(r=>r.ws)).toContain(null);
-  await page.reload();await expect(trigger.locator('strong')).toHaveText('Ada');await trigger.click();await expect(page.locator('#account-menu .account-who')).toContainText('Ada');await expect(page.locator('#account-menu .account-who')).toContainText('ada@example.com');
+  await page.reload();await expect(trigger.locator('strong')).toHaveText('Acme');await openMenu(page);await expect(who).toContainText('Ada');await expect(who).toContainText('ada@example.com');
+  await expect(profiles(page)).toHaveText([/Ada/,/Acme/]);await expect(profiles(page).first()).not.toContainText('Personal');
 });
 
 test('in a team, Profile and Notifications say "For <team>" 4px under the heading; personal pages show nothing extra',async({page})=>{
   await mock(page);await page.setViewportSize({width:1440,height:900});await page.goto(base+'/studio#settings/profile');
   await expect(page.locator('h1')).toHaveText('Profile');await expect(page.locator('.st-for')).toHaveCount(0);
   await page.goto('about:blank');await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');await expect(page.locator('#edit-title')).toHaveValue('Acme demo');
-  await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.locator('h1')).toHaveText('Profile');
+  await openSettings(page);await expect(page.locator('h1')).toHaveText('Profile');
   await expect(page.locator('.st-for')).toHaveText('For Acme');
   const gap=await page.evaluate(()=>{const r=s=>document.querySelector(s).getBoundingClientRect();return {underHeading:r('.st-for').top-r('#main h1').bottom,leadAfter:r('.st-lead').top-r('.st-for').bottom,toContent:r('.pf-grid').top-r('.st-lead').bottom};});
   expect(gap).toEqual({underHeading:4,leadAfter:0,toContent:32});await expect(page.locator('.st-for + .st-lead')).toHaveText('Guests see this on your booking pages.');
@@ -119,7 +139,10 @@ test('stored selection from another account or a removed company never leaks',as
 test('old APIs without workspaces keep Personal only',async({page})=>{
   await mock(page,{companies:false});
   await page.route('**/api/live/workspaces',route=>route.fulfill({status:404,json:{error:'Not found'}}));
-  await page.goto(base+'/studio#link=intro');await expect(page.locator('#edit-title')).toHaveValue('Personal intro');await expect(switcher(page)).toHaveCount(0);await expect(page.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
+  await page.goto(base+'/studio#link=intro');await expect(page.locator('#edit-title')).toHaveValue('Personal intro');
+  // The name menu is still there, with nothing to switch to and no way to make a team.
+  await expect(switcher(page)).toHaveText(/Ada/);const menu=await openMenu(page);await expect(menu.getByRole('button')).toHaveText(['Settings','Sign out']);await expect(menu.locator('[data-workspace]')).toHaveCount(0);
+  await openSettings(page,'Sign-in & data');await expect(page.getByRole('button',{name:'New team',exact:true})).toHaveCount(0);await expect(page.locator('[data-create-workspace]')).toHaveCount(0);
 });
 
 test('unsaved meeting edits are guarded when switching',async({page})=>{
@@ -131,9 +154,9 @@ test('unsaved meeting edits are guarded when switching',async({page})=>{
 
 test('late responses from the previous workspace never repaint the new one',async({page})=>{
   const state=await mock(page,{hold:['/api/live/bookings|personal','/api/live/analytics|personal']});await page.goto(base+'/studio#link=intro');
-  await page.getByRole('button',{name:'Bookings',exact:true}).click();await expect.poll(()=>!!state.held['/api/live/bookings|personal']).toBeTruthy();
-  await switchTo(page,'Acme');await expect(page.locator('.bk-row')).toContainText('Acme booking');
-  state.release('/api/live/bookings|personal');await page.waitForTimeout(150);await expect(page.locator('.bk-row')).toContainText('Acme booking');await expect(page.getByText('Personal booking')).toHaveCount(0);
+  await nav(page).getByRole('button',{name:'Home',exact:true}).click();await expect.poll(()=>!!state.held['/api/live/bookings|personal']).toBeTruthy();
+  await switchTo(page,'Acme');await expect(page.locator('.hm-row')).toContainText('Acme booking');
+  state.release('/api/live/bookings|personal');await page.waitForTimeout(150);await expect(page.locator('.hm-row')).toContainText('Acme booking');await expect(page.getByText('Personal booking')).toHaveCount(0);
   await switchTo(page,'Ada');await nav(page).getByRole('button',{name:'Links',exact:true}).click();await page.getByRole('button',{name:'Stats',exact:true}).click();await expect.poll(()=>!!state.held['/api/live/analytics|personal']).toBeTruthy();
   await switchTo(page,'Acme');await expect(page.locator('.analytics-card').first()).toContainText('7');
   state.release('/api/live/analytics|personal');await page.waitForTimeout(150);await expect(page.locator('.analytics-card').first()).toContainText('7');await expect(switcher(page)).toContainText('Acme');
@@ -142,7 +165,7 @@ test('late responses from the previous workspace never repaint the new one',asyn
 test('membership removal shows recovery instead of stale company controls',async({page})=>{
   const state=await mock(page);await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');await expect(page.locator('#edit-title')).toHaveValue('Acme demo');
   await page.getByRole('button',{name:'Team'}).click();await expect(page.locator('[aria-labelledby=team-members-title] .team-row')).toHaveCount(3);
-  state.companies=[];await page.getByRole('button',{name:'Bookings',exact:true}).click();
+  state.companies=[];await nav(page).getByRole('button',{name:'Home',exact:true}).click();
   const notice=page.locator('.workspace-notice');await expect(notice).toContainText('You no longer have access to Acme');
   await notice.getByRole('button',{name:'Back to your profile'}).click();await expect(switcher(page)).toContainText('Ada');await expect(page.getByRole('button',{name:'Team'})).toHaveCount(0);
 });
@@ -169,24 +192,24 @@ test('team: invite link, revoke, role, transfer and removal call the backend wit
   await expect(dialog.getByText('Remove ad@acme.test from Acme?')).toBeVisible();await expect(dialog.getByRole('button',{name:'Back'})).toBeFocused();await dialog.getByRole('button',{name:'Remove member'}).click();await expect(page.getByText('ad@acme.test')).toHaveCount(0);
   await page.getByRole('button',{name:'Manage bo@acme.test'}).click();dialog=page.getByRole('dialog',{name:'Manage bo@acme.test'});await dialog.getByRole('button',{name:'Transfer ownership…'}).click();
   await expect(dialog.getByText('Make bo@acme.test the owner?')).toBeVisible();await page.screenshot({path:`${shots}/workspace-transfer.png`});await dialog.getByRole('button',{name:'Transfer ownership'}).click();
-  await expect(page.locator('.team-row').filter({hasText:'bo@acme.test'})).toContainText('Owner');await expect(switcher(page)).toHaveAttribute('aria-label',/, Admin$/);
+  await expect(page.locator('.team-row').filter({hasText:'bo@acme.test'})).toContainText('Owner');await expect(page.locator('.team-row').filter({hasText:'ada@example.com'})).toContainText('Admin');
   expect(state.requests.filter(r=>r.path==='/api/live/workspace/members').map(r=>r.body.action)).toEqual(['role','remove','transfer']);
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/workspace-team-mobile.png`,fullPage:true});
 });
 
 test('members and viewers get read-only company access with no admin settings',async({page})=>{
   await mock(page,{role:'viewer'});await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');
-  await expect(page.getByRole('heading',{name:'Bookings'})).toBeVisible();
-  await expect(nav(page).getByRole('button')).toHaveText(['Bookings','Team']);
+  await upcoming(page);
+  await expect(nav(page).getByRole('button')).toHaveText(['Home','Team']);
   for(const name of ['Links','Availability','Integrations'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
-  await page.locator('#account-trigger').click();const menu=page.getByRole('dialog',{name:'Account settings'});await expect(menu.getByRole('button',{name:'Dark',exact:true})).toBeVisible();
+  const menu=await openMenu(page);await expect(menu.getByRole('button')).toHaveText([/Ada/,/Acme/,'Settings','Sign out']);
   for(const name of [/Troubleshooting/,'Edit profile','Change profile picture','Company profile'])await expect(menu.getByRole('button',{name})).toHaveCount(0);
   await page.keyboard.press('Escape');
   // Settings keeps the account-level pages; the team's Profile and Notifications need admin rights.
-  await page.getByRole('button',{name:'Settings',exact:true}).click();await expect(page.getByRole('navigation',{name:'Settings'}).getByRole('button')).toHaveText(['Connected apps','Sign-in & data']);await page.getByRole('button',{name:'Back',exact:true}).click();
+  await openSettings(page);await expect(page.getByRole('navigation',{name:'Settings'}).getByRole('button')).toHaveText(['Connected apps','Sign-in & data']);await page.getByRole('button',{name:'Back',exact:true}).click();
   await page.getByRole('button',{name:'Team'}).click();await expect(page.locator('.team-row')).toHaveCount(3);await expect(page.locator('[data-manage-member]')).toHaveCount(0);await expect(page.getByText('Pending invitations')).toHaveCount(0);await expect(page.getByRole('button',{name:'Invite',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Leave Acme'}).click();const leave=page.getByRole('dialog',{name:'Leave Acme?'});await expect(leave.getByRole('button',{name:'Cancel'})).toBeFocused();await leave.getByRole('button',{name:'Leave Acme',exact:true}).click();
-  await expect(switcher(page)).toContainText('Ada');await expect(page.locator('#host-status')).toHaveText('You left Acme');await switcher(page).click();await expect(page.getByRole('menuitemradio',{name:/Acme/})).toHaveCount(0);
+  await expect(switcher(page)).toContainText('Ada');await expect(page.locator('#host-status')).toHaveText('You left Acme');await openMenu(page);await expect(accountMenu(page).locator('[data-workspace]')).toHaveCount(0);await expect(accountMenu(page)).not.toContainText('Acme');
 });
 
 test('integrations: write-only URL, webhook host gate, one-time secret, test, retry and discard',async({page})=>{
@@ -230,7 +253,7 @@ test('integrations: write-only URL, webhook host gate, one-time secret, test, re
   await page.getByRole('button',{name:'Discard Booking cancelled'}).click();const discard=page.getByRole('dialog',{name:'Discard this delivery?'});await expect(discard).toContainText('will not be sent or replayed');await discard.getByRole('button',{name:'Discard delivery'}).click();
   await expect(page.getByText('held after a restore')).toHaveCount(0);expect(state.requests.filter(r=>r.path==='/api/live/integrations/retry').map(r=>r.body)).toEqual([{deliveryId:'dfail'},{deliveryId:'dheld',action:'discard'}]);
   await page.screenshot({path:`${shots}/integrations-list.png`,fullPage:true});
-  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark',exact:true}).click();await page.screenshot({path:`${shots}/integrations-dark.png`,fullPage:true});
+  await setTheme(page,'Dark');await notifications(page);await page.screenshot({path:`${shots}/integrations-dark.png`,fullPage:true});
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integrations-mobile.png`,fullPage:true});
 });
 
@@ -323,23 +346,24 @@ test('personal booking deep links without a workspace query still open under Per
 });
 
 test('company booking management uses authenticated actions and never a guest link',async({page})=>{
- const state=await mock(page,{role:'admin'});state.moveDuration=47;await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');await page.getByRole('button',{name:'Bookings',exact:true}).click();await page.locator('[data-manage]').first().click();const details=page.getByRole('dialog',{name:'Booking details'});await expect(details.getByRole('link',{name:'Reschedule',exact:true})).toHaveCount(0);await details.getByRole('button',{name:'Reschedule',exact:true}).click();const move=page.getByRole('dialog',{name:'Reschedule booking'});await expect(move.getByLabel('Date',{exact:true})).toHaveValue(/\d{4}-\d{2}-\d{2}/);await expect(move.getByRole('button',{name:'Change time',exact:true})).toBeEnabled();await move.getByRole('button',{name:'Change time',exact:true}).click();await expect(move).toHaveCount(0);await expect(page.getByRole('dialog',{name:'Booking details'})).toBeVisible();const request=state.requests.find(r=>r.path.endsWith('/reschedule'));expect(request.ws).toBe('h_acmeacmeacmeacmeacmeacme');expect(request.body).toMatchObject({start:state.moveStart});expect(request.body.token).toBeUndefined();
+ const state=await mock(page,{role:'admin'});state.moveDuration=47;await page.goto(base+'/studio#link=intro');await switchTo(page,'Acme');await nav(page).getByRole('button',{name:'Home',exact:true}).click();await page.locator('[data-manage]').first().click();const details=page.getByRole('dialog',{name:'Booking details'});await expect(details.getByRole('link',{name:'Reschedule',exact:true})).toHaveCount(0);await details.getByRole('button',{name:'Reschedule',exact:true}).click();const move=page.getByRole('dialog',{name:'Reschedule booking'});await expect(move.getByLabel('Date',{exact:true})).toHaveValue(/\d{4}-\d{2}-\d{2}/);await expect(move.getByRole('button',{name:'Change time',exact:true})).toBeEnabled();await move.getByRole('button',{name:'Change time',exact:true}).click();await expect(move).toHaveCount(0);await expect(page.getByRole('dialog',{name:'Booking details'})).toBeVisible();const request=state.requests.find(r=>r.path.endsWith('/reschedule'));expect(request.ws).toBe('h_acmeacmeacmeacmeacmeacme');expect(request.body).toMatchObject({start:state.moveStart});expect(request.body.token).toBeUndefined();
  await page.getByRole('dialog',{name:'Booking details'}).getByRole('button',{name:'Cancel booking',exact:true}).click();await page.getByRole('dialog',{name:'Booking details'}).getByRole('button',{name:'Cancel booking',exact:true}).click();await expect(page.getByRole('dialog',{name:'Booking details'}).getByText('Cancelled',{exact:true})).toBeVisible();expect(state.requests.find(r=>r.path.endsWith('/cancel')).body).toEqual({});
 });
 
-test('a new team is named from its website alone and the dialog fits a phone',async({page})=>{
-  const state=await mock(page,{companies:false});await page.goto(base+'/studio');await switcher(page).click();await page.getByRole('menuitem',{name:'New team',exact:true}).click();
+test('a new team from Settings is named from its website alone, the dialog fits a phone, and the team opens on Home',async({page})=>{
+  const state=await mock(page,{companies:false});await page.goto(base+'/studio');await expect(switcher(page)).toHaveText(/Ada/);await newTeam(page);
   const dialog=page.getByRole('dialog',{name:'New team'});await expect(dialog.getByLabel('Name',{exact:true})).toBeFocused();
   await dialog.getByLabel('Website',{exact:false}).fill('globex.example');
   await page.setViewportSize({width:390,height:844});const bounds=await dialog.boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(390);expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBeTruthy();await page.screenshot({path:`${shots}/team-create-mobile.png`});
   await page.setViewportSize({width:1280,height:900});await dialog.getByRole('button',{name:'Create team',exact:true}).click();await expect(dialog).toHaveCount(0);
   const request=state.requests.find(r=>r.path==='/api/live/workspaces'&&r.method==='POST');expect(request.body).toEqual({name:'Globex',website:'https://globex.example/'});
-  await expect(switcher(page)).toContainText('Globex');await expect(nav(page).getByRole('button',{name:'Team',exact:true})).toBeVisible();
+  await expect(switcher(page)).toContainText('Globex');await upcoming(page);await expect(page).toHaveTitle(/^Home · /);await expect(nav(page).getByRole('button',{name:'Team',exact:true})).toBeVisible();
+  await openMenu(page);await expect(profiles(page)).toHaveText([/Ada/,/Globex/]);await page.keyboard.press('Escape');
   await page.reload();await expect(switcher(page)).toContainText('Globex');
 });
 
 test('profile creation accepts a person name and rejects credential-bearing websites',async({page})=>{
-  const state=await mock(page,{companies:false});await page.goto(base+'/studio');await switcher(page).click();await page.getByRole('menuitem',{name:'New team',exact:true}).click();
+  const state=await mock(page,{companies:false});await page.goto(base+'/studio');await expect(switcher(page)).toHaveText(/Ada/);await newTeam(page);
   const dialog=page.getByRole('dialog',{name:'New team'});await dialog.getByLabel('Name',{exact:true}).fill('Riley');await dialog.getByLabel('Website',{exact:false}).fill('https://secret@example.com');
   await dialog.getByRole('button',{name:'Create team',exact:true}).click();await expect(dialog.getByRole('alert')).toHaveText('Enter a valid website address.');
   expect(state.requests.filter(r=>r.path==='/api/live/workspaces'&&r.method==='POST')).toHaveLength(0);
@@ -416,7 +440,7 @@ test('integration cards open the selected destination with the webhook gate inta
     await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Connect '+kind,exact:true})).toBeFocused();
   }
   await expect(page.getByRole('button',{name:'Connect Webhook',exact:true})).toHaveCount(0);await expect(page.locator('.integration-choice.is-unavailable')).toContainText('Webhook');
-  await page.locator('#account-trigger').click();await page.getByRole('button',{name:'Dark',exact:true}).click();await page.keyboard.press('Escape');await page.setViewportSize({width:390,height:844});await expect(page.locator('.integration-choice')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
+  await setTheme(page,'Dark');await notifications(page);await page.setViewportSize({width:390,height:844});await expect(page.locator('.integration-choice')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
 });
 
 test('an image still decoding cannot be applied to a profile selected afterwards',async({page})=>{

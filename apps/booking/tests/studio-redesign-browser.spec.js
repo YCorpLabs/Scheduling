@@ -1,4 +1,4 @@
-// The redesigned Studio: Bookings, Links, the one-page link editor, the
+// The redesigned Studio: Home, Links, the one-page link editor, the
 // Availability week calendar, first run, phone layout and reconnect.
 import {test,expect} from '@playwright/test';
 import {DEFAULT} from '../public/policy.js';
@@ -43,62 +43,91 @@ async function open(page,hash='',opts){
  const w=world(opts);await page.route('**/api/**',w.handler);await page.goto(base+'/studio'+hash);return w.state;
 }
 const sidebar=page=>page.getByRole('navigation',{name:'Scheduling'});
+// One name menu at the top of the sidebar (phones: top of the screen) holds the profiles, Settings and Sign out.
+const openMenu=async page=>{await page.locator('#account-trigger').click();const menu=page.getByRole('dialog',{name:'Account',exact:true});await expect(menu).toBeVisible();return menu;};
+const openSettings=async page=>(await openMenu(page)).getByRole('button',{name:'Settings',exact:true}).click();
+// Home (the Bookings section) has no page heading of its own: the link is the h1 and Upcoming follows.
+async function expectHome(page){await expect(page.locator('.hm-hero')).toBeVisible();await expect(page.getByRole('heading',{name:'Upcoming',level:2})).toBeVisible();await expect(page).toHaveTitle(/^Home · /);}
 
-test('navigation is Bookings, Links and Availability; Settings and the account sit at the bottom; Bookings is the default page',async({page})=>{
+test('navigation is Home, Links and Availability; the name menu sits at the top and holds Settings; Home is the default page',async({page})=>{
  await open(page);
- await expect(page.getByRole('heading',{name:'Bookings',level:1})).toBeVisible();
- await expect(sidebar(page).getByRole('button')).toHaveText([/^Bookings\s*1$/,'Links','Availability']);
- for(const gone of ['Activity','Integrations','Hours','Calendars','Booking stats','Troubleshooting','Team'])await expect(page.locator('.host-nav').getByRole('button',{name:gone,exact:true})).toHaveCount(0);
- await expect(page.locator('.nav-group')).toHaveCount(0);
- // Every row is 32px and starts its label 24px from the edge; Settings sits right above the account row.
- const rows=await page.locator('.host-nav .sb-row, .host-nav .workspace-trigger').evaluateAll(els=>els.map(e=>{const r=e.getBoundingClientRect();return {h:r.height,pad:parseFloat(getComputedStyle(e).paddingLeft)+r.left};}));
- for(const row of rows)expect(row).toEqual({h:32,pad:24});
- const settings=await page.locator('.host-nav [data-section=Settings]').boundingBox(),account=await page.locator('#account-trigger').boundingBox();
- expect(settings.y+settings.height).toBe(account.y);expect((await page.locator('.host-nav').boundingBox()).width).toBe(240);
+ await expectHome(page);
+ await expect(sidebar(page).getByRole('button')).toHaveText([/^Home\s*1$/,'Links','Availability']);
+ for(const gone of ['Activity','Integrations','Hours','Calendars','Booking stats','Troubleshooting','Team','Settings','Bookings'])await expect(sidebar(page).getByRole('button',{name:gone,exact:true})).toHaveCount(0);
+ await expect(page.locator('.nav-group')).toHaveCount(0);await expect(page.locator('.host-nav .sb-bottom')).toHaveCount(0);await expect(page.locator('.host-nav .sb-brand')).toHaveCount(0);
+ // Every row is 32px and starts its label 24px from the edge; the name menu sits above them.
+ const rows=await page.locator('.host-nav .sb-row').evaluateAll(els=>els.map(e=>{const r=e.getBoundingClientRect();return {h:r.height,pad:parseFloat(getComputedStyle(e).paddingLeft)+r.left};}));
+ expect(rows).toHaveLength(3);for(const row of rows)expect(row).toEqual({h:32,pad:24});
+ const trigger=page.locator('#account-trigger'),own=await trigger.boundingBox(),first=await page.locator('.host-nav .sb-row').first().boundingBox();
+ await expect(trigger).toHaveText(/Riley Park/);await expect(trigger).toHaveAccessibleName('Riley Park, account menu');expect(own.y+own.height).toBeLessThanOrEqual(first.y);expect((await page.locator('.host-nav').boundingBox()).width).toBe(240);
+ // The menu opens below the name; with only a personal profile there is nothing to switch to.
+ const menu=await openMenu(page);expect((await menu.boundingBox()).y).toBeGreaterThanOrEqual(own.y+own.height);
+ await expect(menu.getByRole('button')).toHaveText(['Settings','Sign out']);await expect(menu).toContainText('riley@example.com');
+ await page.keyboard.press('Escape');await expect(menu).toBeHidden();await expect(trigger).toBeFocused();
  // Settings swaps the sidebar to Back and the Settings pages; the heading names the page and there are no tabs.
- await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await openSettings(page);
  const pages=page.getByRole('navigation',{name:'Settings'});
  await expect(pages.getByRole('button')).toHaveText(['Profile','Connected apps','Notifications','Sign-in & data']);
  await expect(page.getByRole('heading',{level:1})).toHaveText('Profile');await expect(page).toHaveURL(/#settings\/profile$/);await expect(page.getByRole('tab')).toHaveCount(0);
  for(const [name,heading] of [['Connected apps','Connected apps'],['Notifications','Notifications'],['Sign-in & data','Sign-in & data']]){await pages.getByRole('button',{name,exact:true}).click();await expect(page.getByRole('heading',{level:1})).toHaveText(heading);await expect(pages.getByRole('button',{name,exact:true})).toHaveAttribute('aria-current','page');}
+ // Theme sits in Sign-in & data on every size; the extra Sign out there is for phones only.
+ await expect(page.getByRole('group',{name:'Theme'}).getByRole('button')).toHaveText(['Light','Dark','Auto']);await expect(page.locator('main').getByRole('button',{name:'Sign out',exact:true})).toBeHidden();
  await page.getByRole('button',{name:'Back',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Bookings',level:1})).toBeVisible();await expect(sidebar(page).getByRole('button',{name:/^Bookings/})).toHaveAttribute('aria-current','page');
+ await expectHome(page);await expect(sidebar(page).getByRole('button',{name:/^Home/})).toHaveAttribute('aria-current','page');
  // Stats stays one click away in the Links header; the old addresses still open their new homes.
  await sidebar(page).getByRole('button',{name:'Links',exact:true}).click();await page.locator('#main .host-heading').getByRole('button',{name:'Stats',exact:true}).click();await expect(page.getByRole('heading',{name:'Stats',level:1})).toBeVisible();
  await page.goto('about:blank');await page.goto(base+'/studio#activity');await expect(page.getByRole('heading',{name:'Connected apps',level:1})).toBeVisible();
  await page.goto('about:blank');await page.goto(base+'/studio#integrations');await expect(page.getByRole('heading',{name:'Notifications',level:1})).toBeVisible();
- await page.goto('about:blank');await page.goto(base+'/studio#status');await expect(page.getByRole('heading',{name:'Troubleshooting',level:1})).toBeVisible();await expect(page.getByRole('button',{name:'← Bookings',exact:true})).toBeVisible();
+ await page.goto('about:blank');await page.goto(base+'/studio#status');await expect(page.getByRole('heading',{name:'Troubleshooting',level:1})).toBeVisible();await expect(page.getByRole('button',{name:'← Home',exact:true})).toBeVisible();
 });
 
-test('bookings: requests on top with Approve and Decline, Join today, ••• menu, past and cancelled',async({page})=>{
- const state=await open(page);
- const request=page.locator('.bk-card.req .bk-row');
- await expect(request).toContainText('Sara Lind');
- await expect(request).toContainText('Expires in 20 h');
- await expect(page.getByText('Waiting for your OK')).toBeVisible();
- await expect(page.locator('.bk-row').filter({hasText:'Maya Chen'}).getByRole('link',{name:'Join'})).toHaveAttribute('href','https://meet.google.com/abc-defg-hij');
- await page.locator('.bk-row').filter({hasText:'Maya Chen'}).getByRole('button',{name:/More for/}).click();
- await expect(page.getByRole('menuitem')).toHaveText(['Reschedule','Cancel','Details']);
- await page.keyboard.press('Escape');
- await request.getByRole('button',{name:'Decline'}).click();
- await expect(request).toContainText('Decline?');
- await request.getByRole('button',{name:'Keep'}).click();
+test('home: your link with Copy link and Share, then Upcoming by day with Approve on requests and Join today; Past and Cancelled keep the fuller list',async({page,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write'],{origin:base});
+ const state=await open(page);await expectHome(page);
+ // The hero: the first live link without https://, its title and length, Copy link and Share.
+ const hero=page.locator('.hm-hero'),url=`${new URL(base).host}/b/${me}/intro`;
+ await expect(hero).toContainText('Your link');await expect(hero.getByRole('heading',{level:1})).toHaveText(url);await expect(hero).toContainText('Intro call · 30 min');
+ await expect(hero.getByRole('button')).toHaveText(['Copy link','Share']);
+ await hero.getByRole('button',{name:'Copy link',exact:true}).click();await expect(hero.getByRole('button',{name:'Copied',exact:true})).toBeFocused();
+ expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe(`${base}/b/${me}/intro`);
+ const shareButton=hero.getByRole('button',{name:'Share',exact:true});await shareButton.click();
+ const share=page.getByRole('dialog',{name:'Share',exact:true});await expect(share).toBeVisible();
+ await expect(share.getByRole('heading',{level:3})).toHaveText(['Send the link','Put it on your website']);await expect(share.getByRole('button',{name:'Copy',exact:true})).toHaveCount(2);
+ await expect(share.getByRole('button',{name:'Copy',exact:true}).first()).toBeFocused();await expect(share.getByRole('textbox',{name:'Send the link'})).toHaveValue(url);
+ await page.keyboard.press('Escape');await expect(share).toHaveCount(0);await expect(shareButton).toBeFocused();
+ await shareButton.click();await page.getByRole('dialog',{name:'Share',exact:true}).getByRole('button',{name:'More options',exact:true}).click();
+ const full=page.getByRole('dialog',{name:'Share and preview booking link'});await expect(full).toBeVisible();await full.getByRole('button',{name:'Close share and preview'}).click();await expect(full).toHaveCount(0);
+ // Upcoming: one list by day; a request is a row with Approve only, Decline is in its details.
+ await expect(page.getByRole('heading',{name:'Upcoming',level:2})).toBeVisible();await expect(page.locator('.hm-day').first()).toHaveText(/^Today · /);
+ await expect(page.getByText('Waiting for your OK')).toHaveCount(0);await expect(page.locator('.setup-steps')).toHaveCount(0);
+ const request=page.locator('.hm-row').filter({hasText:'Sara Lind'}),maya=page.locator('.hm-row').filter({hasText:'Maya Chen'});
+ await expect(request.getByRole('button')).toHaveText([/Sara Lind/,'Approve']);await expect(request.getByRole('button',{name:'Details: Project consultation with Sara Lind, needs your approval',exact:true})).toBeVisible();
+ await expect(maya.getByRole('link',{name:'Join'})).toHaveAttribute('href','https://meet.google.com/abc-defg-hij');await expect(maya.getByRole('button',{name:'Details: Intro call with Maya Chen',exact:true})).toBeVisible();
+ await expect(page.locator('.hm-row').filter({hasText:'Priya Shah'})).toHaveCount(0);await expect(page.locator('.hm-row').filter({hasText:'Leo Martin'})).toHaveCount(0);
+ // No ••• menus, search or time zone label on Home when the zone is the browser's.
+ await expect(page.locator('.hm-row').getByRole('button',{name:/^More for/})).toHaveCount(0);await expect(page.getByRole('button',{name:'Search',exact:true})).toHaveCount(0);await expect(page.getByText(/^Times in/)).toHaveCount(0);
+ const details=request.getByRole('button',{name:/^Details:/});await details.click();const dialog=page.getByRole('dialog',{name:'Booking details'});
+ await expect(dialog.getByRole('button',{name:'Decline request',exact:true})).toBeVisible();await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(details).toBeFocused();
  expect(state.decisions).toEqual([]);
- await request.getByRole('button',{name:'Approve'}).click();
+ await request.getByRole('button',{name:'Approve',exact:true}).click();
  await expect.poll(()=>state.decisions.map(d=>d.action)).toEqual(['approve']);
- await expect(page.getByText('Waiting for your OK')).toHaveCount(0);
- await expect(sidebar(page).getByRole('button',{name:/^Bookings/})).toHaveText('Bookings');
+ await expect(request.getByRole('button',{name:'Approve'})).toHaveCount(0);await expect(request.getByRole('button',{name:'Details: Project consultation with Sara Lind',exact:true})).toBeVisible();
+ await expect(sidebar(page).getByRole('button',{name:/^Home/})).toHaveText('Home');
+ // Past and Cancelled open the fuller list: ← Home, ••• menus, the time zone and search.
  await page.getByRole('button',{name:'Past (1)'}).click();
  await expect(page.getByRole('heading',{name:'Past'})).toBeVisible();
  await expect(page.locator('.bk-row')).toContainText(['Priya Shah']);
- await page.getByRole('button',{name:'← Bookings'}).click();
+ await page.locator('.bk-row').filter({hasText:'Priya Shah'}).getByRole('button',{name:/More for/}).click();
+ await expect(page.getByRole('menuitem')).toHaveText(['Details']);
+ await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'← Home'}).click();await expectHome(page);
  await page.getByRole('button',{name:'Cancelled (1)'}).click();
  await expect(page.locator('.bk-row')).toContainText(['Leo Martin']);
- await page.getByRole('button',{name:'← Bookings'}).click();
  await expect(page.getByText(/^Times in Oslo/)).toBeVisible();
  await page.getByRole('button',{name:'Search'}).click();
- await page.locator('#booking-search').fill('maya');
- await expect(page.locator('.bk-row')).toHaveCount(1);
+ await page.locator('#booking-search').fill('maya');await expect(page.getByText('No matches.',{exact:true})).toBeVisible();
+ await page.locator('#booking-search').fill('leo');await expect(page.locator('.bk-row')).toHaveCount(1);
+ await page.getByRole('button',{name:'← Home'}).click();await expectHome(page);
 });
 
 test('links: Copy link first, Turn on for off links, the ••• menu, and Stats in the header',async({page,context})=>{
@@ -265,40 +294,49 @@ test('availability: events never hide a block\'s time label at any width, titles
  await expect.poll(()=>state.writes.at(-1)?.availabilitySchedules?.[0]?.weeklyHours?.[3]).toEqual([]);
 });
 
-test('first run: Continue with Google, hours pre-filled Mon–Fri 9–5, then Your link is ready',async({page})=>{
+test('first run: Home asks to connect the calendar, then says no link is on, then shows the link with Copy link',async({page})=>{
  await open(page,'',{firstRun:true});
- const steps=page.locator('.setup-steps');
- await expect(steps.getByRole('heading',{name:'Get your booking link ready'})).toBeVisible();
- await expect(steps.getByRole('link',{name:'Continue with Google'})).toBeVisible();
- await expect(steps).toContainText('Mon–Fri 09:00–17:00');
- await expect(page.getByText('Create your profile')).toHaveCount(0);
+ const hero=page.locator('.hm-hero');
+ await expect(hero.getByRole('heading',{level:1})).toHaveText('Connect your calendar');
+ await expect(hero.getByRole('link',{name:'Continue with Google'})).toHaveAttribute('href','/auth/google?connect=1');
+ await expect(hero.getByRole('button',{name:'Copy link'})).toHaveCount(0);
+ // The old three-step card is gone from Home.
+ for(const gone of ['Get your booking link ready','Looks good','Create your profile','Waiting for your OK'])await expect(page.getByText(gone)).toHaveCount(0);
+ await expect(page.locator('.setup-steps')).toHaveCount(0);
+ const connected=[{id:'riley',email:'riley@example.com',connected:true,destinationCalendarId:'riley@example.com',conflictCalendarIds:['riley@example.com']}];
  await page.unrouteAll({behavior:'ignoreErrors'});
- const w=world({firstRun:true});w.state.settings.accounts=[{id:'riley',email:'riley@example.com',connected:true,destinationCalendarId:'riley@example.com',conflictCalendarIds:['riley@example.com']}];w.state.settings.meetingTypes[0]={...w.state.settings.meetingTypes[0],accountId:'riley',published:true};
+ let w=world({firstRun:true});w.state.settings.accounts=connected;w.state.settings.meetingTypes[0]={...w.state.settings.meetingTypes[0],accountId:'riley'};
  await page.route('**/api/**',w.handler);await page.reload();
- await expect(steps.locator('.step.done')).toHaveCount(1);
- await steps.getByRole('button',{name:'Looks good'}).click();
- await expect(steps).toContainText('Your link is ready');
- await expect(steps.getByRole('button',{name:'Copy link'})).toBeVisible();
+ await expect(hero.getByRole('heading',{level:1})).toHaveText('No link is on yet');await hero.getByRole('button',{name:'Open Links',exact:true}).click();await expect(page.getByRole('heading',{name:'Links',level:1})).toBeVisible();
+ await page.unrouteAll({behavior:'ignoreErrors'});
+ w=world({firstRun:true});w.state.settings.accounts=connected;w.state.settings.meetingTypes[0]={...w.state.settings.meetingTypes[0],accountId:'riley',published:true};
+ await page.route('**/api/**',w.handler);await page.goto(base+'/studio');
+ await expect(hero.getByRole('heading',{level:1})).toHaveText(`${new URL(base).host}/b/${me}/intro`);await expect(hero).toContainText('Intro call · 30 min');
+ await expect(hero.getByRole('button',{name:'Copy link'})).toBeVisible();await expect(page.getByText('No upcoming bookings.',{exact:true})).toBeVisible();
 });
 
-test('phone: bottom tab bar with Settings, Settings as a list, each page with ‹ Settings, no sideways scroll',async({page})=>{
+test('phone: tab bar without Settings, the name menu at the top opens Settings as a list, each page with ‹ Settings, no sideways scroll',async({page})=>{
  await page.setViewportSize({width:390,height:844});
  await open(page);
  const tabs=page.getByRole('navigation',{name:'Sections'});
  await expect(tabs).toBeVisible();
- await expect(tabs.getByRole('button')).toHaveText([/Bookings/,'Links','Availability','Settings']);
+ await expect(tabs.getByRole('button')).toHaveText([/Home/,'Links','Availability']);
  await expect(sidebar(page)).toBeHidden();
- await expect(page.locator('#account-trigger')).toBeHidden();
- const heading=await page.getByRole('heading',{name:'Bookings',level:1}).boundingBox();
- expect(heading.y).toBeLessThan(140);
+ const trigger=page.locator('#account-trigger');await expect(trigger).toBeVisible();const own=await trigger.boundingBox();expect(own.y).toBeLessThan(80);
+ const hero=await page.locator('.hm-hero').boundingBox();expect(hero.y).toBeGreaterThanOrEqual(own.y+own.height);expect(hero.y).toBeLessThan(200);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await tabs.getByRole('button',{name:'Settings'}).click();
- await expect(page.getByRole('heading',{name:'Settings',level:1})).toBeVisible();await expect(tabs.getByRole('button',{name:'Settings'})).toHaveAttribute('aria-current','page');
+ // The menu opens under the name, fits the screen and closes with Escape.
+ const menu=await openMenu(page);const box=await menu.boundingBox();expect(box.y).toBeGreaterThanOrEqual(own.y+own.height);expect(box.x+box.width).toBeLessThanOrEqual(390);
+ await page.keyboard.press('Escape');await expect(menu).toBeHidden();await expect(trigger).toBeFocused();
+ await openSettings(page);
+ await expect(page.getByRole('heading',{name:'Settings',level:1})).toBeVisible();await expect(tabs.locator('[aria-current=page]')).toHaveCount(0);
  const list=page.locator('.st-list-row');await expect(list).toHaveCount(4);
  await expect(list.nth(0)).toContainText('Profile');await expect(list.nth(0)).toContainText('Riley Park');await expect(list.nth(3)).toContainText('riley@example.com');
  await list.filter({hasText:'Notifications'}).click();
  await expect(page.getByRole('heading',{name:'Notifications',level:1})).toBeVisible();
  await page.getByRole('button',{name:'Settings',exact:true}).first().click();await expect(page.getByRole('heading',{name:'Settings',level:1})).toBeVisible();
+ await list.filter({hasText:'Sign-in & data'}).click();await expect(page.getByRole('group',{name:'Theme'})).toBeVisible();await expect(page.locator('main').getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await tabs.getByRole('button',{name:'Availability'}).click();
  await expect(page.locator('[data-week]')).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

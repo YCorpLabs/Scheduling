@@ -1,5 +1,6 @@
-// Bookings home: requests waiting for an OK on top, then upcoming bookings by
-// day. Past and Cancelled are one click away. Markup only; the Studio binds.
+// Home: the person's link (hero, from the Studio), then upcoming bookings by day,
+// with requests in place and Approve on the row. Past and Cancelled are one click
+// away and keep the fuller rows and search. Markup only; the Studio binds.
 import { meetingLink } from './conference-ui.js';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const DAY = 86400000;
@@ -28,7 +29,7 @@ function placeOf(b) {
 }
 
 /** fmt(ms, options) formats in the Studio time zone; zone labels the header. */
-export function bookingsMarkup({ bookings, view = 'home', query = '', searching = false, fmt, zoneName, now = Date.now(), canDecide = false, deciding = {}, loading = false, setup = '', notices = '', stats = false }) {
+export function bookingsMarkup({ bookings, view = 'home', query = '', searching = false, fmt, zoneName, now = Date.now(), canDecide = false, deciding = {}, loading = false, setup = '', notices = '', stats = false, hero = '', showZone = false }) {
   const time = ms => fmt(ms, { hour: '2-digit', minute: '2-digit', hour12: false });
   const dayKey = ms => fmt(ms, { year: 'numeric', month: '2-digit', day: '2-digit' });
   const today = dayKey(now), tomorrow = dayKey(now + DAY);
@@ -37,8 +38,8 @@ export function bookingsMarkup({ bookings, view = 'home', query = '', searching 
     return dayKey(ms) === today ? `Today · ${short}` : dayKey(ms) === tomorrow ? `Tomorrow · ${short}` : short;
   };
   const q = query.trim().toLocaleLowerCase(), matches = b => !q || [b.title, b.name, b.email].some(v => String(v || '').toLocaleLowerCase().includes(q));
-  const head = `<header class="host-heading bk-heading">${view === 'home' ? '<h1>Bookings</h1>' : `<div><button type="button" class="back-to-links" data-bookings-view="home">← Bookings</button><h1>${view === 'past' ? 'Past' : 'Cancelled'}</h1></div>`}<div class="bk-tools"><span class="muted">Times in ${esc(zoneName)}</span>${searching || q ? `<label class="booking-search"><span class="sr-only">Search bookings</span><input id="booking-search" type="search" placeholder="Search" value="${esc(query)}" autocomplete="off"></label>` : '<button type="button" class="link-button" data-booking-search-open>Search</button>'}</div></header>`;
-  if (loading) return `${head}${notices}<p class="bk-empty" role="status">Loading bookings…</p>`;
+  const head = `<header class="host-heading bk-heading">${view === 'home' ? '<h1>Bookings</h1>' : `<div><button type="button" class="back-to-links" data-bookings-view="home">← Home</button><h1>${view === 'past' ? 'Past' : 'Cancelled'}</h1></div>`}<div class="bk-tools"><span class="muted">Times in ${esc(zoneName)}</span>${searching || q ? `<label class="booking-search"><span class="sr-only">Search bookings</span><input id="booking-search" type="search" placeholder="Search" value="${esc(query)}" autocomplete="off"></label>` : '<button type="button" class="link-button" data-booking-search-open>Search</button>'}</div></header>`;
+  if (loading) return view === 'home' && hero ? `${hero}${notices}<h2 class="hm-h2">Upcoming</h2><p class="bk-empty" role="status">Loading bookings…</p>` : `${head}${notices}<p class="bk-empty" role="status">Loading bookings…</p>`;
   const row = (b, { request = false } = {}) => {
     const join = !request && dayKey(b.start) === today && meetingLink(b), length = Math.round((b.end - b.start) / 60000);
     return `<div class="bk-row${request ? ' req' : ''}" data-booking="${esc(b.id)}">
@@ -60,10 +61,28 @@ export function bookingsMarkup({ bookings, view = 'home', query = '', searching 
     const list = bookings.filter(b => (view === 'past' ? isPast(b, now) : isCancelled(b)) && matches(b)).sort((a, b) => b.start - a.start);
     return `${head}<section class="bk-list" aria-label="${view === 'past' ? 'Past bookings' : 'Cancelled bookings'}">${list.length ? byDay(list) : `<p class="bk-empty">${q ? 'No matches.' : view === 'past' ? 'No past bookings.' : 'No cancelled bookings.'}</p>`}</section>`;
   }
+  const pastCount = bookings.filter(b => isPast(b, now)).length, cancelledCount = bookings.filter(isCancelled).length;
+  const more = `<p class="bk-more"><button type="button" class="link-button" data-bookings-view="past">Past${pastCount ? ` (${pastCount})` : ''}</button> · <button type="button" class="link-button" data-bookings-view="cancelled">Cancelled${cancelledCount ? ` (${cancelledCount})` : ''}</button>${stats ? ' · <button type="button" class="link-button" data-section="Analytics">Stats</button>' : ''}</p>`;
+  if (hero) {
+    // One list in time order. A request is a row like any other, with Approve; Decline is in its details.
+    const list = bookings.filter(b => isRequest(b) || isUpcoming(b, now)).sort((a, b) => a.start - b.start);
+    const homeRow = b => {
+      const request = isRequest(b), join = !request && dayKey(b.start) === today && meetingLink(b);
+      const action = request ? canDecide ? `<button type="button" class="secondary compact-button" data-decide="approve" data-booking-id="${esc(b.id)}" ${deciding[b.id] ? 'disabled' : ''}>${deciding[b.id] === 'approve' ? 'Approving…' : 'Approve'}</button>` : '<span class="hm-note">Waiting for approval</span>'
+        : join ? `<a class="secondary compact-button" href="${esc(join)}" target="_blank" rel="noopener noreferrer">Join</a>` : b.status !== 'confirmed' ? `<span class="hm-note">${b.status === 'pending' ? 'Confirming' : 'Cancelling'}</span>` : '';
+      return `<div class="hm-row" data-booking="${esc(b.id)}"><span class="hm-time">${esc(time(b.start))}</span><button type="button" class="hm-main" data-manage="${esc(b.id)}" aria-label="Details: ${esc(b.title)} with ${esc(b.name)}${request ? ', needs your approval' : ''}"><strong>${esc(b.name)}</strong><span>${esc(b.title)}</span></button><span class="hm-acts">${action}</span></div>`;
+    };
+    let last = '', rows = '';
+    for (const b of list) {
+      const key = dayKey(b.start);
+      if (key !== last) { rows += `<h3 class="hm-day">${esc(dayTitle(b.start))}</h3>`; last = key; }
+      rows += homeRow(b);
+    }
+    return `${hero}${notices}<section class="hm-list" aria-labelledby="hm-upcoming"><div class="hm-head"><h2 class="hm-h2" id="hm-upcoming">Upcoming</h2>${showZone ? `<span class="hm-zone">Times in ${esc(zoneName)}</span>` : ''}</div>${rows || '<p class="hm-empty">No upcoming bookings.</p>'}</section>${more}`;
+  }
   const requests = bookings.filter(b => isRequest(b) && matches(b)).sort((a, b) => (a.approvalExpiresAt ?? a.start) - (b.approvalExpiresAt ?? b.start));
   const upcoming = bookings.filter(b => isUpcoming(b, now) && matches(b)).sort((a, b) => a.start - b.start);
-  const pastCount = bookings.filter(b => isPast(b, now)).length, cancelledCount = bookings.filter(isCancelled).length;
-  return `${head}${notices}${setup}${requests.length ? `<section aria-label="Waiting for your OK"><h2 class="bk-section">Waiting for your OK</h2><div class="card bk-card req">${requests.map(b => row(b, { request: true })).join('')}</div></section>` : ''}<section class="bk-list" aria-label="Upcoming bookings">${upcoming.length ? byDay(upcoming) : `<p class="bk-empty">${q ? 'No matches.' : 'No upcoming bookings.'}</p>`}</section><p class="bk-more"><button type="button" class="link-button" data-bookings-view="past">Past${pastCount ? ` (${pastCount})` : ''}</button> · <button type="button" class="link-button" data-bookings-view="cancelled">Cancelled${cancelledCount ? ` (${cancelledCount})` : ''}</button>${stats ? ' · <button type="button" class="link-button" data-section="Analytics">Stats</button>' : ''}</p>`;
+  return `${head}${notices}${setup}${requests.length ? `<section aria-label="Waiting for your OK"><h2 class="bk-section">Waiting for your OK</h2><div class="card bk-card req">${requests.map(b => row(b, { request: true })).join('')}</div></section>` : ''}<section class="bk-list" aria-label="Upcoming bookings">${upcoming.length ? byDay(upcoming) : `<p class="bk-empty">${q ? 'No matches.' : 'No upcoming bookings.'}</p>`}</section>${more}`;
 }
 
 /** The three-step setup card shown until the first link is shared. */
