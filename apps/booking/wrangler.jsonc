@@ -15,8 +15,14 @@
   "name": "scheduling",
   "main": "src/worker.js",
   "compatibility_date": "2026-11-10",
+  // public/ is the source; scripts/build-assets.mjs copies it to dist-assets/
+  // and adds the bundled, content-hashed app under /assets/.
+  "build": {
+    "command": "node scripts/build-assets.mjs",
+    "watch_dir": "public"
+  },
   "assets": {
-    "directory": "public",
+    "directory": "dist-assets",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": [

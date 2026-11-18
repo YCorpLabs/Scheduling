@@ -29,6 +29,7 @@ import { integrationsMarkup, bindIntegrations, integrationsHeading } from "/inte
 import { appView, appsPageMarkup, appDetailMarkup, loadApps, bindApps } from "/apps-ui.js";
 import { SETTINGS_PAGES, pageTitle, parseSettingsHash, settingsHash, settingsSidebarMarkup, phoneBack, pageHead, forTeam, settingsListMarkup, profilePageMarkup, profileCardMarkup, accountPageMarkup, bindSettingsExport } from "/settings-ui.js";
 import { normalizeBrand, brandMark, studioName, legalLinksMarkup } from "/brand.js";
+import { readShell, saveShell, markSection, takeEarlyRead, dropEarlyReads } from "/studio-shell.js";
 const phone = () => {
   try {
     return matchMedia("(max-width: 720px)").matches;
@@ -40,6 +41,14 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 let activeWorkspace = null, onCompanyRefusal = () => {
 };
 const ACCOUNT_ROUTES = /^(workspaces$|workspace\/invitations\/(inspect|accept)$|sessions(\/|$)|calendar-contributions(\/|$))/;
+// A read app.js started beside /api/bootstrap, else a fresh one. Only for reads without a workspace header.
+async function firstRead(path) {
+  const early = takeEarlyRead(path);
+  if (!early) return api(path);
+  const reply = await early;
+  if (reply.error) throw reply.error;
+  return reply.value;
+}
 async function api(path, data, { workspace = activeWorkspace } = {}) {
   const headers = data ? { "Content-Type": "application/json" } : {}, company = workspace && !workspace.personal && !ACCOUNT_ROUTES.test(path) ? workspace : null;
   if (company) headers[WORKSPACE_HEADER] = company.id;
@@ -76,6 +85,10 @@ export async function hostUI(bootstrap) {
   let settingsPage = null, settingsApp = null, appsData = null, appsLoading = false, appsError = "", browserList = null, browserError = "", accountExport = null, contributionReview = "", profileDraft = null, profileError = "", profileSaving = false, personalProfile = null, disposeAppsPopover = () => {
   };
   const root = document.querySelector("#app");
+  // The sidebar app.js painted from this browser's last visit, if it belongs to this account.
+  const shellAccount = account;
+  let savedShell = readShell(), firstFrame = 0;
+  if (savedShell?.account !== shellAccount) savedShell = null;
   const hashSection = (hash) => parseSettingsHash(hash) ? "Settings" : ({ "#calendars": "Availability", "#availability": "Availability", "#analytics": "Analytics", "#stats": "Analytics", "#status": "Status", "#team": "Team", "#links": "Meetings" })[hash] || (/^#link=/.test(hash) ? "Meetings" : "Bookings");
   {
     const initial = parseSettingsHash(location.hash);
@@ -98,7 +111,7 @@ export async function hostUI(bootstrap) {
   const earlyKey = (workspace, path) => (workspace.personal ? "personal" : workspace.id) + " " + path;
   function prefetch(workspace, path) {
     const key = earlyKey(workspace, path);
-    if (!earlyReads.has(key)) earlyReads.set(key, { gen: generation, reply: api(path, null, { workspace }).then((value) => ({ value }), (error) => ({ error })) });
+    if (!earlyReads.has(key)) earlyReads.set(key, { gen: generation, reply: (workspace.personal && takeEarlyRead(path)) || api(path, null, { workspace }).then((value) => ({ value }), (error) => ({ error })) });
   }
   async function take(path) {
     const key = earlyKey(ws.active, path), entry = earlyReads.get(key);
@@ -131,7 +144,7 @@ export async function hostUI(bootstrap) {
   async function loadWorkspaces() {
     let listing = null, failed = "";
     try {
-      listing = await api("workspaces");
+      listing = await firstRead("workspaces");
     } catch (e) {
       if (![404, 405].includes(e.status)) failed = e.message;
     }
@@ -188,6 +201,8 @@ export async function hostUI(bootstrap) {
   function prefetchFirstReads(workspace) {
     prefetch(workspace, "settings");
     prefetch(workspace, "bookings");
+    // Calendars fill the sidebar notices and Availability; asking now keeps them from arriving late.
+    if (workspace.personal) prefetch(workspace, "calendars");
     if (section !== "Availability" || !workspace.personal) return;
     // The week is computed in the browser's zone; a profile in another zone misses and refetches.
     const zoneName = browserZone(), monday = currentMonday(zoneName);
@@ -200,6 +215,7 @@ export async function hostUI(bootstrap) {
       await loadGeneration(gen, first);
     } finally {
       if (gen === generation) earlyReads.clear();
+      if (first) dropEarlyReads();
     }
   }
   async function loadGeneration(gen, first) {
@@ -247,6 +263,14 @@ export async function hostUI(bootstrap) {
     }
     await fixNewProfileZone();
     if (gen !== generation) return;
+    // A page opens complete, not as an empty state or a short panel that its
+    // data then replaces or pushes down. Its reads are already in flight beside settings.
+    const opensWith = { Bookings: ["bookings"], Availability: ["calendar-events?", "calendars"] }[section] || [], prefix = earlyKey(ws.active, "");
+    const pending = [...earlyReads].filter(([key]) => opensWith.some((path) => key === prefix + path || path.endsWith("?") && key.startsWith(prefix + path)));
+    if (pending.length) {
+      await Promise.all(pending.map(([, entry]) => entry.reply));
+      if (gen !== generation) return;
+    }
     render();
     if (section !== "Bookings") refreshBookings({ quiet: true });
     if (section === "Availability") await refreshAvailability();
@@ -282,7 +306,7 @@ export async function hostUI(bootstrap) {
     }
     if (!can(ws.active, "manageSettings")) return;
     try {
-      const result = await api("calendars");
+      const result = await take("calendars");
       if (gen !== generation) return;
       calendars = result.accounts || [];
       calendarsLoaded = true;
@@ -578,7 +602,7 @@ export async function hostUI(bootstrap) {
   }
   async function refreshContributions() {
     try {
-      contributions = (await api("calendar-contributions")).contributions || [];
+      contributions = (await firstRead("calendar-contributions")).contributions || [];
       if (!dirty) render();
     } catch {
     }
@@ -875,6 +899,7 @@ export async function hostUI(bootstrap) {
     }).join("")}</ul></section>`;
   }
   function render() {
+    clearTimeout(firstFrame);
     avUnbind();
     disposeAppsPopover();
     const accountMenuWasOpen = disposeAccountMenu();
@@ -900,7 +925,13 @@ export async function hostUI(bootstrap) {
     const ownHead = section === "Bookings" || section === "Meetings";
     const body = inSettings ? `<div class="st-page${page === "Profile" ? " st-wide" : ""}">${settingsBody(notices)}</div>` : ownHead ? sectionBody(notices) : `<header class="host-heading">${heading}${headingAction()}</header>${notices}${sectionBody()}`;
     const tabs = [...primary, "Settings"].map((x) => `<button type="button" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}><span>${x === "Settings" ? "Settings" : sectionLabel(x)}</span>${count(x, "em")}</button>`).join("");
-    root.innerHTML = `<div class="host-console${inSettings ? " in-settings" : ""}"><aside class="host-nav">${sidebar}</aside><main class="host-content${inSettings ? " is-settings" : ""}" id="main">${body}</main><nav class="tabbar" aria-label="Sections">${tabs}</nav></div>`;
+    // Until the first reads arrive, keep the sidebar this browser showed last time, so the frame does not change under the person.
+    const saved = !settings && !inSettings && savedShell, nav = saved ? markSection(savedShell.nav, section) : sidebar, tabbar = saved ? markSection(savedShell.tabs, section) : tabs;
+    if (settings && !inSettings) {
+      savedShell = null;
+      saveShell({ account: shellAccount, personal: !!ws.active.personal, nav: sidebar, tabs });
+    }
+    root.innerHTML = `<div class="host-console${inSettings ? " in-settings" : ""}"><aside class="host-nav">${nav}</aside><main class="host-content${inSettings ? " is-settings" : ""}" id="main">${body}</main><nav class="tabbar" aria-label="Sections">${tabbar}</nav></div>`;
     bind();
     alignNavigation();
     if (accountMenuWasOpen) accountOpener()?.focus({ preventScroll: true });
@@ -2101,7 +2132,9 @@ export async function hostUI(bootstrap) {
     });
   } catch {
   }
-  // Paint the Studio frame now; the first reads fill it in.
-  render();
+  // Paint the Studio frame; the first reads fill it in. When app.js already shows
+  // the saved frame and the reads are on their way, wait briefly so a fast load
+  // goes straight to the page instead of flashing placeholders first.
+  firstFrame = setTimeout(render, savedShell && root.querySelector(".host-console") ? 300 : 0);
   await load({ first: true });
 }

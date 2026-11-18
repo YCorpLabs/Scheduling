@@ -9,6 +9,7 @@ import {DEFAULT_BRAND,normalizeBrand,brandLabel,brandMark,legalLinksMarkup,organ
 import {guestDurations,guestDurationMarkup,durationLabel} from '/durations-ui.js';
 import {policyFor,bookingPolicy,changeNoteMarkup,manageChangeState,closedText,isChangeWindowClosed} from '/change-policy-ui.js';
 import {isLinkClosed,closedLinkMarkup} from '/link-access-ui.js';
+import {readShell,clearShell,shellSection,shellMarkup,startEarlyReads,dropEarlyReads} from '/studio-shell.js';
 const app=document.querySelector('#app');
 const params=new URLSearchParams(location.search);
 const admin=['/','/studio'].includes(location.pathname);
@@ -57,8 +58,14 @@ async function api(path,data){
     else if(path==='book'&&originalBooking){endpoint='/api/manage/'+publicRoute[1]+'/'+originalBooking.id;data={action:'reschedule',token:managementToken,start:data.start,key:data.key};}
   } else if(service.mode==='live'&&preview&&path==='availability')endpoint='/api/live/availability?type='+encodeURIComponent(params.get('type')||'intro');
   const length=durationPending??chosenDuration;if(path==='availability'&&!data&&!originalBooking&&length!=null)endpoint+=(endpoint.includes('?')?'&':'?')+'duration='+length;
-  const response=await fetch(endpoint,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});
-  const result=await response.json(); if(!response.ok)throw Object.assign(Error(result.error||'Could not connect. Please try again.'),{status:response.status,code:result.code});return result;
+  return reply(await fetch(endpoint,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{}));
+}
+async function reply(response){const result=await response.json(); if(!response.ok)throw Object.assign(Error(result.error||'Could not connect. Please try again.'),{status:response.status,code:result.code});return result;}
+// First paint of a booking page while its times load: the page's own frame, with no sample host or times.
+function guestSkeleton(){
+  document.body.classList.toggle('embed-mode',embedded);
+  const bar=size=>`<i class="sk-bar ${size}"></i>`;
+  app.innerHTML=`${embedded?'':`<header class="guest-top row between">${wordmark()}</header>`}<main class="guest-stage" id="main"><div class="booking is-skeleton" aria-busy="true"><aside class="host-intro" aria-hidden="true"><div class="avatar"></div><p class="host-name">${bar('short')}</p><h1>${bar('title')}</h1><div class="meeting-meta">${bar('short')}${bar('short')}</div></aside>${calendar()}<section class="time-pane" aria-hidden="true"><div class="time-header"><h3 class="time-heading">${bar('short')}</h3></div><div class="time-list">${'<span class="slot sk-slot"></span>'.repeat(6)}</div></section></div></main><p class="sr-only" role="status">Loading availability…</p>`;
 }
 function replaceSlots(slots){allAvailable=slots||[];available=teamSlots(allAvailable,config.team,selectedTeamHostId,originalBooking);}
 function chooseHost(id){if(durationPending!==null)return;if(!config.team?.hosts.some(h=>h.id===id)&&id!=='')return;captureDraft();selectedTeamHostId=id;selectedSlot=null;selectedDate='';error='';requestKey=crypto.randomUUID();replaceSlots(allAvailable);pickFirstDate();guest('host');(document.querySelector('#guest-team-host')||document.querySelector('[data-choose-host]'))?.focus();}
@@ -260,18 +267,25 @@ document.addEventListener('keydown',e=>{
 });
 async function boot(){
   if(ownerPreview){document.title='Preview · '+DEFAULT_BRAND.productName;service={mode:'live'};app.innerHTML='<main class="loading" id="main" role="status">Preview</main>';if(parent!==window)parent.postMessage({type:'email-booking:owner-ready'},location.origin);return;}
+  // The session check, Studio's code and its first reads (or a booking page's times) all start now, together.
+  const bootstrap=fetch('/api/bootstrap').then(r=>r.json());bootstrap.catch(()=>{});
   // Studio code downloads while the session is checked, not after. Importing it has no side effects.
   const studioCode=admin?import('/host-ui.js'):null;studioCode?.catch(()=>{});
+  const shell=admin?readShell():null;startEarlyReads(shell);
+  const earlyTimes=publicRoute&&!preview&&!params.get('reschedule')?fetch('/api/public/'+publicRoute[1]+'/'+publicRoute[2]+'/availability').then(reply):null;earlyTimes?.catch(()=>{});
+  // Paint the page's own frame now (Studio: the sidebar as last shown), so nothing jumps when data arrives.
+  if(admin)app.innerHTML=shellMarkup(shell,shellSection(location.hash))||'<main class="loading" id="main" aria-busy="true"><span class="sr-only" role="status">Loading…</span></main>';
+  else if(managementRoute||location.pathname==='/site')app.innerHTML='<main class="loading" id="main">Loading…</main>';
+  else guestSkeleton();
   if(admin&&(await import('/account-deletion-ui.js')).resumeAccountDeletion({root:app}))return;
-  app.innerHTML=`<main class="loading" id="main">${admin?'Loading…':'Loading availability…'}</main>`;
   try{
-    const bootstrap=fetch('/api/bootstrap').then(r=>r.json());bootstrap.catch(()=>{});
     // Studio invitations: move the fragment token into this tab's session before sign-in can drop it.
     if(admin&&location.hash.startsWith('#invite=')){const invite=await import('/workspace-ui.js');invite.stashInviteToken(invite.captureInviteToken());}
     service=await bootstrap;
     serviceBrand=normalizeBrand(service.brand);document.title='Book a conversation · '+brandLabel(serviceBrand);
     if(service.mode!=='local'&&admin){
       if(service.mode==='live'&&service.authenticated){await (await studioCode).hostUI(service);return;}
+      clearShell();dropEarlyReads();
       app.innerHTML=signInScreen({setup:service.mode==='setup'});return;
     }
     if(service.mode==='live'&&managementRoute){await (await import('/manage-ui.js')).manageUI({hostId:managementRoute[1],id:managementRoute[2],token:location.hash.slice(1)});return;}
@@ -280,7 +294,7 @@ async function boot(){
       const change=manageChangeState(originalBooking);if(originalBooking.status==='confirmed'&&change.closed.includes('reschedule')){rescheduleClosed(closedText({...change,closed:['reschedule']},zone,hour12));return;}
     }
     if(service.mode!=='local'&&!publicRoute&&!preview){app.innerHTML=signInScreen({entry:true});return;}
-    let state;try{state=await api('availability');}catch(err){if(originalBooking&&isChangeWindowClosed(err)){rescheduleClosed(err.message);return;}if(!originalBooking&&isLinkClosed(err)){showClosedLink(err.code);return;}throw err;}config=state.config;configLoaded=true;replaceSlots(state.slots);pickFirstDate();
+    let state;try{state=await (earlyTimes&&service.mode==='live'&&!originalBooking?earlyTimes:api('availability'));}catch(err){if(originalBooking&&isChangeWindowClosed(err)){rescheduleClosed(err.message);return;}if(!originalBooking&&isLinkClosed(err)){showClosedLink(err.code);return;}throw err;}config=state.config;configLoaded=true;replaceSlots(state.slots);pickFirstDate();
     if(service.mode==='live'&&publicRoute&&!preview&&params.has('start')){const start=Number(params.get('start'));selectedSlot=Number.isSafeInteger(start)?available.find(slot=>slot.start===start)||null:null;suggestedTimeUnavailable=!selectedSlot&&!(config.team?.mode==='choose'&&!selectedTeamHostId);}
     if(location.pathname==='/site'){theme();app.innerHTML=`<main class="website-demo" id="main"><header>${wordmark()}<button class="secondary" data-email-booking="${location.origin}/book">Book a demo ↗</button></header><section class="hero"><p class="eyebrow">Website booking example</p><h1>See the product.<br>Ask your questions.</h1><p>Book a 30-minute demo with our team. Choose a time below or use the booking button.</p><button class="primary" data-email-booking="${location.origin}/book">Book a demo ↗</button></section><p class="eyebrow" style="margin-bottom:20px">Or book right here</p><div data-email-booking="${location.origin}/book"></div></main>`;const script=document.createElement('script');script.src='/embed.js';document.body.append(script);return;}
     admin?studio():guest();

@@ -1,4 +1,5 @@
 import {profileWebsite,profileName} from './profile-identity.js';
+import {clearShell} from './studio-shell.js';
 // Company workspaces in Studio: switcher, Team section, invitations and shared dialog helpers.
 // Account identity stays personal. A company is a separate host selected per request with the
 // X-Scheduling-Workspace header. Every action is confirmed by the backend before the UI changes.
@@ -44,7 +45,8 @@ export function resolveWorkspaces(listing,{account,stored}={}){
 }
 export function readStoredWorkspace(){try{const value=JSON.parse(localStorage.getItem(STORE_KEY)||'null');return value&&typeof value.account==='string'&&typeof value.id==='string'?value:null;}catch{return null;}}
 export function storeWorkspace(account,workspace){try{if(!workspace)localStorage.removeItem(STORE_KEY);else localStorage.setItem(STORE_KEY,JSON.stringify({account,id:workspace.id,name:workspace.name}));}catch{}}
-export function clearStoredWorkspace(){try{localStorage.removeItem(STORE_KEY);}catch{}}
+// Also forgets the saved Studio sidebar: every sign-out and account change passes through here.
+export function clearStoredWorkspace(){try{localStorage.removeItem(STORE_KEY);}catch{}clearShell();}
 
 // Pending invitation: this tab only, short-lived, never in localStorage, a query string or a log.
 const INVITE_KEY='scheduling-pending-invite',INVITE_TTL=30*60000;
