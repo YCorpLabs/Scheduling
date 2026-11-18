@@ -21,6 +21,8 @@ npm run dev
 
 Open `http://127.0.0.1:8788/studio`, `/book`, or `/site`. Without `.dev.vars`, these use isolated loopback-only fixture data. No Google events or messages are sent in this mode. Hosted routes do not expose the unauthenticated fixture API.
 
+`public/` is the source for the browser app. Before `wrangler dev` and `wrangler deploy`, Wrangler runs `scripts/build-assets.mjs`. The script copies `public/` to the ignored `dist-assets/` and bundles the app's JavaScript and CSS into content-hashed files under `/assets/`, which browsers cache for a year. Every other file keeps its address, including `/embed.js`. Tests import the modules in `public/` directly.
+
 For a connected local service, copy `.dev.vars.example` to ignored `.dev.vars` and supply a **separate Google Web Application** OAuth client (see [self-hosting](../../docs/self-hosting.md)). Its registered callback must match `PUBLIC_ORIGIN/auth/google/callback` exactly. Generate `TOKEN_ENCRYPTION_KEY` with `openssl rand -base64 32`; keep it stable and backed up securely. Losing it makes stored grants and recovery links unreadable. Never reuse desktop refresh tokens.
 
 ## Host and guest flows

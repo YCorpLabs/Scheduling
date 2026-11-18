@@ -624,3 +624,15 @@ html:has(main.sign-in-card) body,main.sign-in-card{margin:0}
 @media(max-width:600px){.member-calendar-row{grid-template-columns:minmax(0,1fr) auto}.member-calendar-row strong{grid-column:1/-1;white-space:normal;overflow-wrap:anywhere}.calendar-reconnect{flex-direction:column;align-items:flex-start}}
 [data-theme=dark] .connection-state[data-state=reconnect]{color:#eeaaa3}
 .calendar-connect-empty+.team-block,.calendar-connections+.team-block{margin-top:32px}
+
+/* First paint of a booking page while its times load (app.js guestSkeleton): the
+   page's own frame and month, no sample host or times. Bars sit inside the real
+   text elements, so their line heights hold the space the text takes. */
+.booking.is-skeleton .sk-bar{display:inline-block;vertical-align:middle;height:.75em;border-radius:5px;background:var(--line)}
+.booking.is-skeleton .sk-bar.short{width:96px}
+.booking.is-skeleton .sk-bar.title{width:190px;max-width:100%}
+.booking.is-skeleton .meeting-meta .sk-bar{display:block;height:12px;margin:4px 0}
+.booking.is-skeleton .avatar{border-color:transparent;background:var(--line)}
+.booking.is-skeleton .sk-slot{display:block;background:none}
+.booking.is-skeleton .date-cell{color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){.booking.is-skeleton .sk-bar,.booking.is-skeleton .avatar,.booking.is-skeleton .sk-slot{animation:sk-pulse 1.6s ease-in-out infinite}}
