@@ -62,9 +62,10 @@ test('hours are one editor without company or named-schedule controls and save t
  expect(state.writes().filter(w=>w.path==='/api/live/my-calendar').map(w=>w.body.schedule.zone)).toEqual(['America/New_York','UTC']);
 });
 
+// Profiles are switched from the name menu at the top of the sidebar; its button then names the person.
 async function switchToPersonal(page){
- await page.locator('#workspace-trigger').click();await page.locator(`#workspace-menu [data-workspace="${person}"]`).click();
- await expect(page.locator('#workspace-trigger')).toHaveAccessibleName(/^Profile: (Ada|ada@example\.com)$/);
+ await page.locator('#account-trigger').click();await page.locator(`#account-menu [data-workspace="${person}"]`).click();
+ await expect(page.locator('#account-trigger')).toHaveAccessibleName(/^(Ada|ada@example\.com), account menu$/);
 }
 
 test('a late calendar save after switching profile changes nothing in the new profile',async({page})=>{

@@ -134,7 +134,7 @@ test('guest reschedule shows the accepted snapshot deadline for the new time',as
 test('staff actions ignore guest cutoffs and use only private owner routes',async({page})=>{
  const start=Date.now()+H,b=confirmed({start,end:start+30*60000,changePolicy:policy(start,1440,1440),meetingTypeSlug:'intro'});
  const state=await fixture(page,{guest:false,detail:b});await page.goto(base+'/studio#link=intro');
- await page.getByRole('button',{name:'Bookings',exact:true}).click();await page.locator('[data-manage]').click();const dialog=page.getByRole('dialog',{name:'Booking details'});
+ await page.getByRole('navigation',{name:'Scheduling'}).getByRole('button',{name:'Home',exact:true}).click();await page.locator('[data-manage]').click();const dialog=page.getByRole('dialog',{name:'Booking details'});
  await expect(dialog.getByRole('link',{name:'Reschedule'})).toHaveCount(0);await expect(dialog.getByRole('button',{name:'Reschedule',exact:true})).toBeEnabled();
  await dialog.getByRole('button',{name:'Reschedule',exact:true}).click();const move=page.getByRole('dialog',{name:'Reschedule booking'});await expect(move.getByRole('button',{name:'Change time'})).toBeEnabled();await move.getByRole('button',{name:'Cancel',exact:true}).click();
  await dialog.getByRole('button',{name:'Cancel booking',exact:true}).click();await dialog.getByLabel(/Reason/).fill(' Host unavailable ');await dialog.getByRole('button',{name:'Cancel booking',exact:true}).click();

@@ -1,7 +1,8 @@
 import { draftPreview } from "/preview-policy.js";
 import { showShare } from "/share-ui.js";
+import { showQuickShare } from "/quick-share-ui.js";
 import { memberConnectUrl, memberCalendarPayload } from "/my-calendar-ui.js";
-import { accountMenuMarkup, bindAccountMenu, accountName, initials, applyTheme, setTheme, followSystemTheme, syncThemeChoices } from "/account-menu.js";
+import { accountMenuMarkup, meMenuMarkup, bindAccountMenu, accountName, initials, applyTheme, setTheme, followSystemTheme, syncThemeChoices } from "/account-menu.js";
 import { bindTeamEditor } from "/team-ui.js";
 import { newMeeting, meetingSlug } from "/meeting-defaults.js";
 import { showHostReschedule } from "/host-booking-ui.js";
@@ -394,11 +395,11 @@ export async function hostUI(bootstrap) {
     message = note;
     history.replaceState(null, "", hashFor(section));
     render();
-    document.querySelector("#workspace-trigger")?.focus();
+    document.querySelector("#account-trigger")?.focus();
     await load();
     if (note) status(note);
     requestAnimationFrame(() => {
-      if (!document.querySelector("dialog[open]")) document.querySelector("#workspace-trigger")?.focus();
+      if (!document.querySelector("dialog[open]")) document.querySelector("#account-trigger")?.focus();
     });
   }
   function createProfile(trigger, onboarding = false) {
@@ -407,6 +408,8 @@ export async function hostUI(bootstrap) {
       const target = ws.workspaces.find((w) => w.id === created.id) || created;
       if (!ws.workspaces.some((w) => w.id === target.id)) ws = { ...ws, workspaces: [...ws.workspaces, target] };
       editing = false;
+      // A new team opens on its Home, also when it was created from Settings.
+      if (section === "Settings") section = "Bookings";
       await switchTo(target);
     } });
   }
@@ -455,7 +458,7 @@ export async function hostUI(bootstrap) {
   const hashFor = (next) => next === "Settings" ? settingsHash(currentSettingsPage(), settingsApp) : next === "Meetings" ? editing && settings?.meetingTypes[selected] ? "#link=" + encodeURIComponent(settings.meetingTypes[selected].id) : "#links" : { Availability: "#availability", Analytics: "#stats", Status: "#status", Team: "#team" }[next] || location.pathname;
   const hostId = () => settings?.hostId || bootstrap.hostId;
   const link = (t) => `${location.origin}/b/${hostId()}/${t.slug}`;
-  const sectionLabel = (name) => name === "Settings" ? pageTitle(currentSettingsPage()) : ({ Meetings: "Links", Analytics: "Stats", Status: "Troubleshooting" })[name] || name;
+  const sectionLabel = (name) => name === "Settings" ? pageTitle(currentSettingsPage()) : ({ Bookings: "Home", Meetings: "Links", Analytics: "Stats", Status: "Troubleshooting" })[name] || name;
   function bookingLinks() {
     return linksMarkup({ settings, stats: linkStats, savedIds: savedTypeIds, canEdit: can(ws.active, "manageSettings"), copied: copiedLink });
   }
@@ -587,8 +590,22 @@ export async function hostUI(bootstrap) {
     } catch {
     }
   }
+  // The top of Home: the link guests book, with Copy link and Share. Until a calendar is
+  // connected (personal profiles) or a link is live, it says what is missing instead.
+  function homeLink() {
+    return (settings?.meetingTypes || []).find((t) => t.published && savedTypeIds.has(t.id)) || null;
+  }
+  function homeHero() {
+    if (!settings) return "";
+    const connected = !ws.active.personal || settings.accounts.some((a) => a.connected && !a.ownerMemberId), t = homeLink();
+    const head = (title, sub, buttons) => `<section class="hm-hero" aria-labelledby="hm-title"><p class="hm-label">Your link</p><div class="hm-link"><div class="hm-text"><h1 class="hm-url" id="hm-title">${title}</h1>${sub ? `<p class="hm-sub">${sub}</p>` : ""}</div><div class="hm-btns">${buttons}</div></div></section>`;
+    if (!connected) return head("Connect your calendar", "Then your link is ready to share.", `<a class="primary" data-calendar-connect href="${esc(connectHref())}">Continue with Google</a>`);
+    if (!t) return head("No link is on yet", "", can(ws.active, "manageSettings") ? '<button type="button" class="primary" data-section="Meetings">Open Links</button>' : "");
+    const minutes = Array.isArray(t.durationOptions) && t.durationOptions.length > 1 ? t.durationOptions.join(", ") + " min" : (t.duration || 30) + " min";
+    return head(esc(link(t).replace(/^https?:\/\//, "")), `${esc(t.title)} · ${esc(minutes)}`, `<button type="button" class="primary" data-home-copy>${copiedLink === "home" ? "Copied" : "Copy link"}</button><button type="button" class="secondary" data-home-share>Share</button>`);
+  }
   function bookingList(notices = "") {
-    return bookingsMarkup({ bookings, view: bookingView, query: bookingQuery, searching: bookingSearching, fmt, zoneName: zoneLabel(zone()), canDecide: can(ws.active, "approveBookings"), deciding, loading: bookingLoading && !bookingLoaded, setup: bookingView === "home" ? setupCard() : "", notices: notices + attentionNotice(), stats: allowed().includes("Analytics") && !allowed().includes("Meetings") });
+    return bookingsMarkup({ bookings, view: bookingView, query: bookingQuery, searching: bookingSearching, fmt, zoneName: zoneLabel(zone()), canDecide: can(ws.active, "approveBookings"), deciding, loading: bookingLoading && !bookingLoaded, setup: "", hero: bookingView === "home" ? homeHero() : "", showZone: zone() !== browserZone(), notices: notices + attentionNotice(), stats: allowed().includes("Analytics") && !allowed().includes("Meetings") });
   }
   function refreshButton(id, loading) {
     return `<button class="secondary refresh-bookings" id="${id}" aria-label="Refresh" ${loading ? "disabled" : ""}>${icon("refresh")}<span>${loading ? "Refreshing…" : "Refresh"}</span></button>`;
@@ -886,7 +903,7 @@ export async function hostUI(bootstrap) {
       return back + appsPageMarkup(appsData, { loading: appsLoading, error: appsError, origin: location.origin, head: (action) => pageHead("Connected apps", action), status: notices });
     }
     if (page === "Notifications") return back + pageHead("Notifications", intData ? integrationsHeading(intData) : "") + forTeam(ws.active) + '<p class="st-lead">Post new and changed bookings where your team will see them.</p>' + notices + integrationsMarkup(intData, { loading: intLoading, error: intError, formatTime: time });
-    return back + accountPageMarkup({ email: bootstrap.email || "", head: pageHead("Sign-in & data"), status: notices, sessions: browserList, sessionsError: browserError, contributions, workspaceName, review: contributionReview, legal: legalLinksMarkup(brand) });
+    return back + accountPageMarkup({ email: bootstrap.email || "", head: pageHead("Sign-in & data"), status: notices, sessions: browserList, sessionsError: browserError, contributions, workspaceName, review: contributionReview, legal: legalLinksMarkup(brand), teams: ws.supported ? ws.workspaces.filter((w) => !w.personal).map((w) => w.name) : null });
   }
   // Calendars an admin connected for the whole team (from before members had their own).
   function companyCalendarsMarkup() {
@@ -916,15 +933,16 @@ export async function hostUI(bootstrap) {
     const count = (x, tag) => x === "Bookings" && requests ? `<${tag} class="sb-count" aria-label="${requests} waiting for your OK">${requests}</${tag}>` : "";
     const navRow = (x) => `<button type="button" class="sb-row" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}><span>${sectionLabel(x)}</span>${count(x, "span")}</button>`;
     const notices = `${accessNotice ? `<div class="setup-callout workspace-notice" role="alert"><div><strong>You no longer have access to ${esc(accessNotice.name)}</strong></div><button class="secondary compact-button" data-workspace-personal>Back to your profile</button></div>` : ""}${reconnectNotice()}<p id="host-status" class="${message ? "has-message" : ""}" role="status">${esc(message)}</p>`;
-    const back = section === "Analytics" ? allowed().includes("Meetings") ? ["Meetings", "← Links"] : ["Bookings", "← Bookings"] : section === "Status" ? ["Bookings", "← Bookings"] : null;
+    const back = section === "Analytics" ? allowed().includes("Meetings") ? ["Meetings", "← Links"] : ["Bookings", "← Home"] : section === "Status" ? ["Bookings", "← Home"] : null;
     const heading = `<div>${back ? `<button type="button" class="back-to-links" data-section="${back[0]}">${back[1]}</button>` : ""}<h1>${sectionLabel(section)}</h1></div>`;
     const ownName = accountName({ profileName: personalProfile?.name || (ws.active.personal ? profile.name : ""), email: bootstrap.email });
     const switcher = switcherMarkup({ ...ws, workspaces: ws.workspaces.map((w) => w.personal ? { ...w, name: ownName } : w), active: { ...ws.active, ...ws.active.personal ? { name: ownName } : {}, avatarImage: profile.avatarImage } }) || `<div class="sb-row sb-brand"><span class="workspace-mark" aria-hidden="true">${esc(brandMark(brand))}</span><strong>${esc(brand.productName)}</strong></div>`;
-    const account = accountMenuMarkup({ name, email: bootstrap.email, avatar });
-    const sidebar = inSettings ? settingsSidebarMarkup({ pages: settingsPages(), current: page, account }) : `<div class="host-brand">${switcher}</div><nav class="sb-nav" aria-label="Scheduling">${primary.map(navRow).join("")}</nav><div class="sb-bottom"><button type="button" class="sb-row" data-section="Settings">Settings</button>${account}</div>`;
+    // One menu at the top holds the account, the profiles (for people in a team), Settings and Sign out.
+    const me = meMenuMarkup({ name, email: bootstrap.email, avatar, active: ws.active, workspaces: ws.supported ? ws.workspaces : [] });
+    const sidebar = inSettings ? settingsSidebarMarkup({ pages: settingsPages(), current: page, account: "" }) : `<div class="host-brand">${me}</div><nav class="sb-nav" aria-label="Scheduling">${primary.map(navRow).join("")}</nav>`;
     const ownHead = section === "Bookings" || section === "Meetings";
     const body = inSettings ? `<div class="st-page${page === "Profile" ? " st-wide" : ""}">${settingsBody(notices)}</div>` : ownHead ? sectionBody(notices) : `<header class="host-heading">${heading}${headingAction()}</header>${notices}${sectionBody()}`;
-    const tabs = [...primary, "Settings"].map((x) => `<button type="button" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}><span>${x === "Settings" ? "Settings" : sectionLabel(x)}</span>${count(x, "em")}</button>`).join("");
+    const tabs = primary.map((x) => `<button type="button" data-section="${x}" ${section === x ? 'aria-current="page"' : ""}><span>${sectionLabel(x)}</span>${count(x, "em")}</button>`).join("");
     // Until the first reads arrive, keep the sidebar this browser showed last time, so the frame does not change under the person.
     const saved = !settings && !inSettings && savedShell, nav = saved ? markSection(savedShell.nav, section) : sidebar, tabbar = saved ? markSection(savedShell.tabs, section) : tabs;
     if (settings && !inSettings) {
@@ -1413,6 +1431,9 @@ export async function hostUI(bootstrap) {
   }
   function bind() {
     disposeAccountMenu = bindAccountMenu(root);
+    root.querySelectorAll("#account-menu [data-workspace]").forEach((b) => b.onclick = () => {
+      if (b.getAttribute("aria-pressed") !== "true") selectWorkspace(b.dataset.workspace);
+    });
     if (section === "Analytics" && analyticsData) bindAnalytics(document.querySelector(".analytics-workspace"), analyticsData, (metric) => {
       analyticsMetric = metric;
     });
@@ -1486,6 +1507,7 @@ export async function hostUI(bootstrap) {
       location.reload();
     }));
     bindSwitcher(root, { onSelect: selectWorkspace, onCreate: (trigger) => leaveEditor(() => createProfile(trigger)) });
+    document.querySelectorAll(".st-page [data-create-workspace]").forEach((b) => b.onclick = () => leaveEditor(() => createProfile(b)));
     document.querySelectorAll("[data-workspace-personal]").forEach((b) => b.onclick = () => leaveEditor(() => switchTo(ws.personal)));
     const retryLoad = document.querySelector("#retry-load");
     if (retryLoad) retryLoad.onclick = () => load();
@@ -1738,6 +1760,28 @@ export async function hostUI(bootstrap) {
       const id = b.dataset.rowMenu, booking = bookings.find((x) => x.id === id), manage = booking?.status === "confirmed" && booking.end > Date.now();
       showRowMenu(b, [...manage ? [["reschedule", "Reschedule"], ["cancel", "Cancel", true]] : [], ["details", "Details"]], (pick) => openBooking(id, b, { confirmCancel: pick === "cancel", reschedule: pick === "reschedule" }));
     });
+    const homeCopy = document.querySelector("[data-home-copy]");
+    if (homeCopy) homeCopy.onclick = busy(async (_e, gen) => {
+      const t = homeLink();
+      if (!t) return;
+      await navigator.clipboard.writeText(link(t));
+      if (gen !== generation) return;
+      saveSetup({ shared: true });
+      copiedLink = "home";
+      render();
+      document.querySelector("[data-home-copy]")?.focus();
+      setTimeout(() => {
+        if (copiedLink !== "home") return;
+        copiedLink = "";
+        const again = document.querySelector("[data-home-copy]");
+        if (again) again.textContent = "Copy link";
+      }, 2e3);
+    });
+    const homeShare = document.querySelector("[data-home-share]");
+    if (homeShare) homeShare.onclick = () => {
+      const t = homeLink();
+      if (t) showQuickShare({ trigger: homeShare, liveUrl: link(t), onMore: () => openShare(settings.meetingTypes.indexOf(t), homeShare) });
+    };
     const hoursOk = document.querySelector("[data-setup-hours]");
     if (hoursOk) hoursOk.onclick = () => {
       saveSetup({ hours: true });

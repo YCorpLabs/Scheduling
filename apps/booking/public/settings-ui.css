@@ -184,3 +184,76 @@ button.st-change-what:hover{text-decoration:underline;text-underline-offset:3px}
   .tabbar button[aria-current=page]{color:var(--ui-ink)!important;font-weight:600!important}
   .tabbar em{top:-6px!important;left:calc(50% + 24px)!important}
 }
+
+/* ----- Name menu at the top of the sidebar (account-menu.js meMenuMarkup) ----- */
+.host-console .host-nav .me-trigger{display:flex!important;align-items:center;gap:8px;width:100%;max-width:none;height:40px;min-height:40px;padding:6px 12px!important}
+.me-trigger .account-trigger-name{flex:1;min-width:0}
+.me-trigger .account-trigger-name strong{font-weight:600}
+.me-trigger .me-chev{flex:none;color:var(--ui-muted)}
+.me-mark{flex:none;display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--ui-ink);color:var(--surface);font-size:11px;font-weight:650}
+.me-popover .host-avatar{flex:none;display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:50%;background:var(--ui-ink);color:var(--surface);font-size:10px;font-weight:650;overflow:hidden}
+.me-popover .host-avatar img{width:100%;height:100%;object-fit:cover}
+.me-popover .me-who{display:flex;align-items:center;gap:12px;padding:8px}
+.me-popover .me-who>span{min-width:0}
+.me-popover .me-who .host-avatar{width:32px;height:32px;font-size:12px}
+.me-label{margin:0;padding:8px 8px 4px;font-size:12px;line-height:16px;color:var(--ui-muted)}
+.me-popover .me-item,.me-popover>.me-item{display:flex;align-items:center;justify-content:flex-start;gap:8px;width:100%;min-height:36px;padding:6px 8px;border:0;border-radius:8px;background:none;color:var(--ui-ink);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer}
+.me-popover .me-item:hover,.me-popover .me-item:focus-visible{background:var(--ui-hover)}
+.me-item-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.me-check{color:var(--ui-muted)}
+
+/* ----- Home: your link, then Upcoming (bookings-ui.js) ----- */
+.hm-hero{margin:0 0 64px}
+.hm-label{margin:0 0 8px;font-size:14px;line-height:20px;color:var(--ui-muted)}
+.hm-link{display:flex;align-items:center;flex-wrap:wrap;gap:16px}
+.hm-text{flex:1 1 320px;min-width:0}
+.host-content h1.hm-url{margin:0;font-size:24px;line-height:32px;font-weight:650;letter-spacing:-.4px;overflow-wrap:anywhere}
+.hm-sub{margin:4px 0 0;font-size:14px;line-height:20px;color:var(--ui-muted)}
+.hm-btns{display:flex;gap:8px}
+.hm-btns>.primary,.hm-btns>.secondary{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 16px;border-radius:999px;font-size:14px;font-weight:600;text-decoration:none}
+.host-content .hm-h2{margin:0 0 8px;font-size:20px;line-height:28px;font-weight:650;letter-spacing:-.3px}
+.host-content .hm-day{margin:24px 0 0;padding:0 0 8px;border-bottom:1px solid var(--ui-line);font-size:13px;line-height:18px;font-weight:400;color:var(--ui-muted)}
+.hm-row{display:grid;grid-template-columns:72px minmax(0,1fr) auto;align-items:center;gap:16px;min-height:64px;border-bottom:1px solid var(--ui-line)}
+.hm-time{font-size:14px;font-weight:600}
+.hm-main{display:flex;flex-direction:column;align-items:flex-start;min-width:0;padding:12px 0;border:0;background:none;color:var(--ui-ink);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer}
+.hm-main strong{font-weight:600}
+.hm-main span{color:var(--ui-muted)}
+.hm-main strong,.hm-main span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hm-main:hover strong{text-decoration:underline;text-underline-offset:3px}
+.hm-acts{display:flex;align-items:center;gap:8px}
+.hm-acts .compact-button{border-radius:999px}
+.hm-note{font-size:13px;color:var(--ui-muted)}
+.hm-empty{margin:0;padding:24px 0;color:var(--ui-muted)}
+.hm-list+.bk-more{margin-top:24px}
+
+/* ----- Share from Home (quick-share-ui.js) ----- */
+dialog.quick-share{width:min(480px,calc(100vw - 32px));padding:0}
+.qs-body{padding:0 24px 24px}
+.qs-row{padding:16px 0;border-top:1px solid var(--ui-line)}
+.qs-row h3{margin:0 0 8px;font-size:14px;line-height:20px;font-weight:600}
+.qs-field{display:flex;align-items:center;gap:8px}
+.qs-field input{flex:1;min-width:0;height:36px;padding:0 12px;border:1px solid var(--ui-line);border-radius:8px;background:var(--ui-field);color:var(--ui-ink);font:inherit;font-size:13px}
+.qs-field input.qs-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.qs-field .compact-button{border-radius:999px}
+.qs-more{margin-top:8px}
+
+@media(max-width:720px){
+  .host-nav .host-account.me-menu{height:auto}
+  #account-menu.me-popover{top:60px!important;bottom:auto!important}
+  .tabbar{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:1fr}
+  .hm-hero{margin-bottom:48px}
+  .hm-btns{width:100%}
+  .hm-btns>.primary,.hm-btns>.secondary{flex:1;height:44px}
+  .host-content h1.hm-url{font-size:20px;line-height:28px}
+  .hm-row{grid-template-columns:56px minmax(0,1fr) auto}
+  dialog.quick-share{width:100%;max-width:none;margin:auto 0 0;border-radius:16px 16px 0 0}
+}
+.account-popover.me-popover .me-who .host-avatar{display:grid;place-items:center;width:32px;height:32px;font-size:12px;line-height:1;color:var(--surface)}
+.account-popover.me-popover .me-who>span{display:block;color:var(--ui-ink)}
+.account-popover.me-popover .me-who>span>strong{color:var(--ui-ink)}
+.account-popover.me-popover .me-who>span>span{display:block;color:var(--ui-muted)}
+.hm-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.hm-zone{font-size:13px;color:var(--ui-muted)}
+.host-nav .host-brand,.host-account.me-menu{min-width:0;width:100%}
+.host-console .host-nav .me-trigger{min-width:0;overflow:hidden}
+.me-trigger .account-trigger-name strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
