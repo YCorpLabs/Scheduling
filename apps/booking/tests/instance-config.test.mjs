@@ -47,6 +47,7 @@ test('overlays cannot change bindings, migrations or tracing, or carry secrets',
 
 test('required identity is checked and example values are refused',()=>{
   assert.deepEqual(validateOverlay(overlay()),[]);
+  const withTwenty=overlay();withTwenty.vars.INTEGRATION_TWENTY_HOSTS='crm.acme.org';assert.deepEqual(validateOverlay(withTwenty),[]);
   const noOrigin=overlay();delete noOrigin.vars.PUBLIC_ORIGIN;assert.match(validateOverlay(noOrigin).join('\n'),/PUBLIC_ORIGIN must be an HTTPS origin/);
   for(const origin of ['http://meet.acme.test','https://meet.acme.test/','https://meet.acme.test/path']){const value=overlay();value.vars.PUBLIC_ORIGIN=origin;assert.notDeepEqual(validateOverlay(value),[],origin);}
   for(const name of ['','Acme','acme_scheduling','-acme'])assert.match(validateOverlay({...overlay(),name}).join('\n'),/"name" must be a Worker name/);

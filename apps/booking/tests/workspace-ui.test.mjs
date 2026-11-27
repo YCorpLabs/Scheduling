@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {resolveWorkspaces,sectionsFor,can,canManageMember,inviteRoles,captureInviteToken,teamMarkup} from '../public/workspace-ui.js';
-import {integrationPayload,validateIntegration,eventCatalog,eventGroups,eventSummary,deliveryStateLabel,canRetry,errorLabel,integrationsMarkup,integrationsHeading,webhookHostsReady,integrationHealth,testStatus} from '../public/integrations-ui.js';
+import {integrationPayload,validateIntegration,eventCatalog,eventGroups,eventSummary,deliveryStateLabel,canRetry,errorLabel,integrationsMarkup,integrationsHeading,webhookHostsReady,twentyHostsReady,integrationHealth,testStatus} from '../public/integrations-ui.js';
 import {validateDestination} from '../src/integrations.js';
 
 const caps=role=>({manageSettings:['owner','admin'].includes(role),manageMembers:['owner','admin'].includes(role),manageIntegrations:['owner','admin'].includes(role),approveBookings:role!=='viewer',transferOwnership:role==='owner',grantAdmin:role==='owner'});
@@ -85,6 +85,32 @@ test('URL checks in the editor agree with the Worker for Slack and Discord',()=>
     assert.equal(ui,worker,`${kind} ${url}`);
   }
   assert.equal(validateIntegration({action:'create',kind:'slack',name:'',url:'https://hooks.slack.com/services/T0123456/B0123456/abcdefghijklmnop',events:['booking.confirmed']},{requireUrl:true}).field,'name');
+});
+test('Twenty CRM editor payloads, validation parity, labels and catalog rows match the Worker',()=>{
+  const apiKey='twenty_test_api_key_1234567890';
+  const createBody=integrationPayload({kind:'twenty',name:' Twenty CRM ',url:'https://api.twenty.com',apiKey:' '+apiKey+' ',events:['booking.confirmed'],includeGuestDetails:true,enabled:true});
+  assert.deepEqual(createBody,{action:'create',kind:'twenty',name:'Twenty CRM',url:'https://api.twenty.com',apiKey,events:['booking.confirmed'],includeGuestDetails:true,enabled:true});
+  const updateBody=integrationPayload({kind:'twenty',name:'CRM',url:'',apiKey:'',events:['booking.confirmed'],includeGuestDetails:true,enabled:true},{id:'t1',kind:'twenty'});
+  assert.equal('url' in updateBody,false);assert.equal('apiKey' in updateBody,false);
+  assert.equal(validateIntegration({...createBody,apiKey:''},{requireUrl:true,requireApiKey:true}).field,'apiKey');
+  assert.equal(validateIntegration({...createBody,apiKey:'short'},{requireUrl:true,requireApiKey:true}).field,'apiKey');
+  assert.equal(twentyHostsReady({status:{customTwentyHostsConfigured:true}}),true);assert.equal(twentyHostsReady({}),false);
+  const urlCases=[
+    ['https://api.twenty.com',false],['https://api.twenty.com/rest',false],['https://api.twenty.com/rest/',false],
+    ['https://api.twenty.com/rest/people',false],['https://api.twenty.com?a=1',false],['http://api.twenty.com',false],
+    ['https://crm.acme.org',false],['https://crm.acme.org',true],['https://crm.acme.org/rest',true],['https://127.0.0.1',true],['https://api.twenty.com\\@evil.com',false]
+  ];
+  for(const [url,twentyHosts] of urlCases){
+    const ui=validateIntegration({action:'create',kind:'twenty',name:'T',url,apiKey,events:['booking.confirmed']},{requireUrl:true,requireApiKey:true,twentyHosts})===null;
+    let worker=true;try{validateDestination(url,'twenty',twentyHosts?{INTEGRATION_TWENTY_HOSTS:'crm.acme.org'}:{});}catch{worker=false;}
+    assert.equal(ui,worker,`twenty ${url} hosts=${twentyHosts}`);
+  }
+  assert.match(errorLabel('provider_unauthorized'),/API key/);
+  assert.match(errorLabel('twenty_host_not_approved'),/Twenty host/);
+  const emptyHtml=integrationsMarkup({integrations:[],deliveries:[]},{formatTime:String});
+  assert.match(emptyHtml,/data-choice="twenty"[^]*Twenty CRM[^]*Sync contacts and booking notes[^]*data-add-integration data-kind="twenty"/);
+  const rowHtml=integrationsMarkup({integrations:[{id:'t1',kind:'twenty',name:'Sales CRM',enabled:true,events:['booking.confirmed'],includeGuestDetails:true,destinationLabel:'api.twenty.com',revision:1}],deliveries:[]},{formatTime:String});
+  assert.match(rowHtml,/Twenty CRM · api\.twenty\.com · Confirmed · Shares guest details/);
 });
 test('rows flag only a failing or retrying newest delivery, and test results read plainly',()=>{
   const ds=[{integrationId:'a',state:'cancelled'},{integrationId:'a',state:'failed',errorCode:'provider_rejected'},{integrationId:'b',state:'delivered'},{integrationId:'b',state:'failed'},{integrationId:'c',state:'retry',errorCode:'rate_limited'}];

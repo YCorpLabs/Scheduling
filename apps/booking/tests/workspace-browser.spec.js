@@ -8,7 +8,7 @@ const settingsFor=(hostId,name,title)=>({revision:'A'.repeat(43),hostId,profile:
 
 // Stateful mock of the agreed workspace and integration routes. Nothing here reaches a provider.
 async function mock(page,{role='admin',companies=true,authenticated=true,email='ada@example.com',hold,inspect}={}){
-  const state={requests:[],role,members:[{id:'h_me',email:'ada@example.com',role},{id:'h_owner',email:'owner@acme.test',role:'owner'},{id:'h_bo',email:'bo@acme.test',role:'member'}],invitations:[{id:'inv1',email:'cy@acme.test',role:'viewer',expiresAt:Date.parse('2026-11-19T12:00:00Z')}],companies:companies?[{id:'h_acmeacmeacmeacmeacmeacme',name:'Acme'}]:[],integrations:[],deliveries:[],hostsReady:false,held:{}};
+  const state={requests:[],role,members:[{id:'h_me',email:'ada@example.com',role},{id:'h_owner',email:'owner@acme.test',role:'owner'},{id:'h_bo',email:'bo@acme.test',role:'member'}],invitations:[{id:'inv1',email:'cy@acme.test',role:'viewer',expiresAt:Date.parse('2026-11-19T12:00:00Z')}],companies:companies?[{id:'h_acmeacmeacmeacmeacmeacme',name:'Acme'}]:[],integrations:[],deliveries:[],hostsReady:false,twentyHostsReady:false,held:{}};
   if(role==='owner')state.members=[{id:'h_me',email:'ada@example.com',role:'owner'},{id:'h_bo',email:'bo@acme.test',role:'member'}];
   const listing=()=>({workspaces:[{id:'h_me',name:'Personal',role:'owner',personal:true,capabilities:caps('owner')},...state.companies.map(c=>({id:c.id,name:c.name,role:c.role||state.role,personal:false,capabilities:caps(c.role||state.role)}))],activeWorkspaceId:'h_me'});
   state.release=key=>{state.held[key]?.();delete state.held[key];};
@@ -37,7 +37,7 @@ async function mock(page,{role='admin',companies=true,authenticated=true,email='
     if(path==='/api/live/workspace/members'){if(body.action==='remove'&&body.memberId==='h_me'){state.companies=[];return json({left:true,workspace:null,members:[]});}const m=state.members.find(x=>x.id===body.memberId);if(body.action==='role')m.role=body.role;if(body.action==='remove')state.members=state.members.filter(x=>x!==m);if(body.action==='transfer'){m.role='owner';state.role='admin';state.members.find(x=>x.id==='h_me').role='admin';}return json({ok:true});}
     if(path==='/api/live/workspace/invitations/inspect')return inspect?json(...inspect):json({invitation:{id:'inv2',email:'ada@example.com',role:'member',expiresAt:Date.now()+86400000,workspaceName:'Acme',workspaceId:'h_acmeacmeacmeacmeacmeacme'}});
     if(path==='/api/live/workspace/invitations/accept'){state.companies=[{id:'h_acmeacmeacmeacmeacmeacme',name:'Acme',role:'member'}];return json({workspace:{id:'h_acmeacmeacmeacmeacmeacme',name:'Acme',role:'member',capabilities:caps('member')}});}
-    if(path==='/api/live/integrations'&&req.method()==='GET')return json({integrations:state.integrations,deliveries:state.deliveries,status:{customWebhookHostsConfigured:state.hostsReady,summary:{queued:0,quarantined:state.deliveries.filter(d=>d.state==='quarantined').length,failed:state.deliveries.filter(d=>d.state==='failed').length,inFlight:0,overdue:0}},capabilities:{kinds:['slack','discord','webhook'],events:['booking.requested','booking.confirmed','booking.rescheduled','booking.cancelled','booking.approval_requested','booking.rejected','booking.expired'],customWebhooksRequireApprovedHost:true,atLeastOnce:true}});
+    if(path==='/api/live/integrations'&&req.method()==='GET')return json({integrations:state.integrations,deliveries:state.deliveries,status:{customWebhookHostsConfigured:state.hostsReady,customTwentyHostsConfigured:state.twentyHostsReady,summary:{queued:0,quarantined:state.deliveries.filter(d=>d.state==='quarantined').length,failed:state.deliveries.filter(d=>d.state==='failed').length,inFlight:0,overdue:0}},capabilities:{kinds:['slack','discord','twenty','webhook'],events:['booking.requested','booking.confirmed','booking.rescheduled','booking.cancelled','booking.approval_requested','booking.rejected','booking.expired'],customWebhooksRequireApprovedHost:true,customTwentyRequiresApprovedHost:true,atLeastOnce:true}});
     if(path==='/api/live/integrations'){
       if(body.action==='create'){const i={id:'i'+(state.integrations.length+1),kind:body.kind,name:body.name,enabled:body.enabled,events:body.events,includeGuestDetails:body.includeGuestDetails,destinationLabel:new URL(body.url).hostname,revision:1};state.integrations.push(i);return json({integration:i,...(body.kind==='webhook'?{signingSecret:'whsec_test_only_value'}:{})});}
       const i=state.integrations.find(x=>x.id===body.id);if(body.expectedRevision!==i.revision)return json({error:'Integration changed. Refresh before saving.',code:'integration_conflict'},409);
@@ -214,7 +214,7 @@ test('members and viewers get read-only company access with no admin settings',a
 
 test('integrations: write-only URL, webhook host gate, one-time secret, test, retry and discard',async({page})=>{
   const state=await mock(page);await page.goto(base+'/studio#link=intro');await notifications(page);
-  await expect(page.locator('.integration-choice')).toHaveCount(3);await expect(page.getByRole('button',{name:'Add integration',exact:true})).toHaveCount(0);
+  await expect(page.locator('.integration-choice')).toHaveCount(4);await expect(page.getByRole('button',{name:'Add integration',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Connect Webhook',exact:true})).toHaveCount(0);await expect(page.locator('.integration-choice.is-unavailable')).toContainText('Not available on this service');
   await page.getByRole('button',{name:'Connect Slack',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Connect Slack'});await expect(dialog.getByLabel('Slack webhook URL')).toBeFocused();await expect(dialog.getByLabel('Name',{exact:true})).toHaveValue('Slack');
@@ -239,7 +239,7 @@ test('integrations: write-only URL, webhook host gate, one-time secret, test, re
   await expect(page.locator('.integration-row.off .st-line')).toHaveText(/^Off · Slack/);await expect(page.locator('#host-status')).toHaveText('Ops is off');
   await page.getByRole('button',{name:'More for Ops'}).click();await expect(page.getByRole('menuitem')).toHaveText(['Turn on','Edit','Remove…']);await page.keyboard.press('Escape');
   // generic webhook with approved hosts returns a one-time secret
-  state.hostsReady=true;await notifications(page);await page.getByRole('button',{name:'Add integration',exact:true}).click();await expect(page.getByRole('menuitem')).toHaveText(['Slack','Discord','Webhook']);await page.getByRole('menuitem',{name:'Webhook'}).click();const hook=page.getByRole('dialog',{name:'Connect Webhook'});
+  state.hostsReady=true;await notifications(page);await page.getByRole('button',{name:'Add integration',exact:true}).click();await expect(page.getByRole('menuitem')).toHaveText(['Slack','Discord','Twenty CRM','Webhook']);await page.getByRole('menuitem',{name:'Webhook'}).click();const hook=page.getByRole('dialog',{name:'Connect Webhook'});
   await hook.getByLabel('Name',{exact:true}).fill('CRM');await hook.getByLabel('Endpoint URL').fill('https://crm.example/hooks');await hook.getByRole('button',{name:'Connect',exact:true}).click();
   const secret=page.getByRole('dialog',{name:'Signing secret'});await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveAttribute('type','password');await expect(secret.getByRole('button',{name:'Copy'})).toBeFocused();await secret.getByRole('button',{name:'Reveal'}).click();await expect(secret.getByRole('textbox',{name:'Signing secret'})).toHaveValue('whsec_test_only_value');
   await page.screenshot({path:`${shots}/integration-secret.png`});await secret.getByRole('button',{name:'Done'}).click();await expect(page.locator('dialog')).toHaveCount(0);await expect(page.getByRole('button',{name:'Edit CRM'})).toBeFocused();
@@ -272,7 +272,7 @@ test('integration edits keep the saved URL unless replaced, and removal needs a 
   const remove=page.getByRole('dialog',{name:'Remove CRM sync'});await expect(remove).toContainText('CRM sync stops receiving booking updates.');await remove.getByRole('button',{name:'Cancel'}).click();await expect(remove).toHaveCount(0);
   expect(state.requests.some(r=>r.body?.action==='remove')).toBe(false);
   await page.getByRole('button',{name:'More for CRM sync'}).click();await page.getByRole('menuitem',{name:'Remove…'}).click();await page.getByRole('dialog',{name:'Remove CRM sync'}).getByRole('button',{name:'Remove integration'}).click();
-  await expect(page.locator('.integration-row:not(.integration-choice)')).toHaveCount(0);await expect(page.locator('.integration-choice')).toHaveCount(3);expect(state.requests.filter(r=>r.body?.action==='remove').at(-1).body).toMatchObject({id:'i1',expectedRevision:4});await expect(page.getByRole('button',{name:'Connect Slack'})).toBeFocused();
+  await expect(page.locator('.integration-row:not(.integration-choice)')).toHaveCount(0);await expect(page.locator('.integration-choice')).toHaveCount(4);expect(state.requests.filter(r=>r.body?.action==='remove').at(-1).body).toMatchObject({id:'i1',expectedRevision:4});await expect(page.getByRole('button',{name:'Connect Slack'})).toBeFocused();
 });
 
 test('signed-out invite keeps the token out of URLs, survives sign-in and needs explicit acceptance',async({page})=>{
@@ -432,7 +432,7 @@ test('Add AI app shows the three steps and copies the full address; with nothing
 });
 
 test('integration cards open the selected destination with the webhook gate intact',async({page})=>{
-  await mock(page,{companies:false});await page.goto(base+'/studio#integrations');await expect(page.locator('.integration-choice')).toHaveCount(3);
+  await mock(page,{companies:false});await page.goto(base+'/studio#integrations');await expect(page.locator('.integration-choice')).toHaveCount(4);
   await page.setViewportSize({width:1440,height:960});await page.screenshot({path:`${shots}/integration-catalog-desktop.png`});
   for(const kind of ['Slack','Discord']){
     await page.getByRole('button',{name:'Connect '+kind,exact:true}).click();const dialog=page.getByRole('dialog',{name:'Connect '+kind});
@@ -440,7 +440,64 @@ test('integration cards open the selected destination with the webhook gate inta
     await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);await expect(page.getByRole('button',{name:'Connect '+kind,exact:true})).toBeFocused();
   }
   await expect(page.getByRole('button',{name:'Connect Webhook',exact:true})).toHaveCount(0);await expect(page.locator('.integration-choice.is-unavailable')).toContainText('Webhook');
-  await setTheme(page,'Dark');await notifications(page);await page.setViewportSize({width:390,height:844});await expect(page.locator('.integration-choice')).toHaveCount(3);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
+  await setTheme(page,'Dark');await notifications(page);await page.setViewportSize({width:390,height:844});await expect(page.locator('.integration-choice')).toHaveCount(4);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();await page.screenshot({path:`${shots}/integration-catalog-mobile-dark.png`});
+});
+
+test('Twenty CRM integration: write-only API key, cloud default, connection test and edit flow',async({page})=>{
+  const state=await mock(page,{companies:false});await page.goto(base+'/studio#integrations');
+  await page.getByRole('button',{name:'Connect Twenty CRM',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Connect Twenty CRM'});
+  await expect(dialog.getByLabel('Twenty API key')).toBeFocused();
+  await expect(dialog.getByLabel('Twenty API URL')).toHaveValue('https://api.twenty.com');
+  await expect(dialog.getByLabel('Name',{exact:true})).toHaveValue('Twenty CRM');
+  await expect(dialog.getByRole('checkbox',{name:/Sync guest name and email/})).toBeChecked();
+  // Missing API key is caught at the field without submitting.
+  await dialog.getByRole('button',{name:'Connect',exact:true}).click();
+  await expect(dialog.getByText('Paste your Twenty API key.')).toBeVisible();
+  expect(state.requests.some(r=>r.path==='/api/live/integrations'&&r.method==='POST')).toBe(false);
+  // Unapproved self-hosted host is caught when custom Twenty hosts are not enabled.
+  await dialog.getByLabel('Twenty API key').fill('twenty_browser_secret_key_123456');
+  await dialog.getByLabel('Twenty API URL').fill('https://crm.acme.org');
+  await dialog.getByRole('button',{name:'Connect',exact:true}).click();
+  await expect(dialog.getByText(/Self-hosted Twenty hosts are not enabled/)).toBeVisible();
+  // Restore cloud URL and connect.
+  await dialog.getByLabel('Twenty API URL').fill('https://api.twenty.com');
+  await dialog.getByLabel('Name',{exact:true}).fill('Sales Twenty');
+  await dialog.getByRole('button',{name:'Connect',exact:true}).click();
+  const connected=page.getByRole('dialog',{name:'Sales Twenty is connected'});
+  await expect(connected.getByRole('button',{name:'Test connection'})).toBeFocused();
+  await connected.getByRole('button',{name:'Test connection'}).click();
+  await expect.poll(()=>state.deliveries.length).toBe(1);
+  Object.assign(state.deliveries[0],{state:'delivered',attempts:1,lastAttemptAt:Date.now()});
+  await expect(connected.getByRole('status')).toHaveText('Connected to Twenty.',{timeout:8000});
+  await connected.getByRole('button',{name:'Done'}).click();
+  await expect(connected).toHaveCount(0);
+  // API key never appears in DOM or storage.
+  expect(await page.content()).not.toContain('twenty_browser_secret_key');
+  expect(await page.evaluate(()=>JSON.stringify({...localStorage})+JSON.stringify({...sessionStorage}))).not.toContain('twenty_browser_secret_key');
+  await expect(page.locator('.integration-row')).toContainText('Twenty CRM · api.twenty.com · Confirmed, cancelled · Shares guest details');
+  const created=state.requests.find(r=>r.path==='/api/live/integrations'&&r.method==='POST').body;
+  expect(created).toMatchObject({action:'create',kind:'twenty',name:'Sales Twenty',url:'https://api.twenty.com',apiKey:'twenty_browser_secret_key_123456',includeGuestDetails:true,enabled:true});
+  // Edit preserves URL and API key unless explicitly replaced.
+  await page.getByRole('button',{name:'Edit Sales Twenty'}).click();
+  const edit=page.getByRole('dialog',{name:'Edit Sales Twenty'});
+  await expect(edit.getByText('api.twenty.com',{exact:true})).toBeVisible();
+  await expect(edit.getByText('Saved API key')).toBeVisible();
+  await expect(edit.getByLabel('New API key')).toBeHidden();
+  await edit.getByRole('button',{name:'Replace API key'}).click();
+  await expect(edit.getByLabel('New API key')).toBeFocused();
+  await edit.getByRole('button',{name:'Keep current key'}).click();
+  await expect(edit.getByLabel('New API key')).toBeHidden();
+  await edit.getByLabel('Name',{exact:true}).fill('CRM Pipeline');
+  await edit.getByRole('button',{name:'Save changes'}).click();
+  await expect(edit).toHaveCount(0);
+  const updated=state.requests.filter(r=>r.body?.action==='update').at(-1).body;
+  expect(updated).toMatchObject({id:'i1',name:'CRM Pipeline',expectedRevision:1});
+  expect('apiKey' in updated).toBe(false);expect('url' in updated).toBe(false);
+  // Unauthorized delivery shows API key guidance.
+  state.deliveries.unshift({id:'dunauth',integrationId:'i1',eventId:'e2',eventType:'booking.confirmed',state:'failed',attempts:1,nextAttemptAt:null,lastAttemptAt:Date.now(),errorCode:'provider_unauthorized'});
+  await notifications(page);
+  await expect(page.locator('.integration-row .st-line-problem')).toHaveText('Failing · Rejected by the destination. Check the API key.');
 });
 
 test('an image still decoding cannot be applied to a profile selected afterwards',async({page})=>{

@@ -21,6 +21,9 @@ async function script(){return (await build({stdin:{resolveDir:new URL('..',impo
    if(path==='/due'){for(const row of l.rows("SELECT body FROM live_integration_deliveries WHERE state IN ('queued','retry','in_flight')")){const job=JSON.parse(row.body);job.due=Date.now();l.integrations.saveDelivery(job);}return Response.json({ok:true});}
    if(path==='/cycle'){let epoch=l.maintenanceEpoch();const a=await l.setMaintenance({action:'freeze',expectedEpoch:epoch});const b=await l.setMaintenance({action:'resume',expectedEpoch:epoch+1});return Response.json({a,b});}
    if(path==='/resume')return Response.json(await l.setMaintenance({action:'resume',expectedEpoch:l.maintenanceEpoch()}));
+   if(path==='/setup-twenty'){l.init({id:'fixture-host',name:'Fixture'});const c=await l.configureIntegration({kind:'twenty',name:'Twenty CRM',url:'https://api.twenty.com',apiKey:'twenty_workerd_secret_1234567890',events:['booking.confirmed']});return Response.json(c);}
+   if(path==='/seed-confirmed'){const now=Date.now();l.putBooking({id:'fixture_twenty_booking_1234',requestKey:'fixture-twenty-req',meetingTypeId:'intro',title:'CRM Intro',name:'Ada Lovelace',email:'ada@example.com',start:now+3600000,end:now+5400000,status:'confirmed',version:1});await l.wake();return Response.json(l.integrationStatus());}
+   if(path==='/test-twenty'){return Response.json(await l.testIntegration({id:body.id}));}
    if(path==='/discard')return Response.json(await l.retryIntegrationDelivery({deliveryId:body.id,action:'discard'}));
    return new Response('not found',{status:404});
   }
@@ -42,5 +45,47 @@ test('workerd outbox survives restart; ambiguous retries keep event ID and resto
   mode='accepted';mf=start(live);await call(mf,'/due',{});await call(mf,'/alarm',{});assert.equal(sent.length,2);assert.equal(sent[0].id,sent[1].id);assert.equal((await call(mf,'/status')).integrations.deliveries[0].state,'delivered');const cycle=await call(mf,'/cycle',{});assert.equal(cycle.b.ok,true);await mf.dispose();mf=null;
   cpSync(snapshot,restored,{recursive:true});mf=start(restored);state=await call(mf,'/status');const job=state.integrations.deliveries[0];assert.equal(job.state,'quarantined');assert.equal(state.operations.outbound.frozen,true);assert.ok(state.operations.issues.some(i=>i.code==='integration_restore_quarantine'));await call(mf,'/alarm',{});assert.equal(sent.length,2);assert.equal((await call(mf,'/resume',{})).code,'integration_restore_quarantine');assert.equal((await call(mf,'/discard',{id:job.id})).ok,true);assert.equal((await call(mf,'/resume',{})).ok,true);await call(mf,'/alarm',{});assert.equal(sent.length,2);
   for(const message of sent){assert.ok(!JSON.stringify(message).includes('private@example.com'));assert.ok(!JSON.stringify(message).includes('Private Guest'));}
+ }finally{await mf?.dispose();rmSync(root,{recursive:true,force:true});}
+});
+
+test('workerd Twenty CRM outbox verifies connection and resumes multi-step sync across restart without duplicating records',async()=>{
+ const source=await script(),root=mkdtempSync(join(tmpdir(),'booking-twenty-drill-')),dir=join(root,'live');
+ const calls=[];let failTargetOnce=true;
+ const outboundService=async request=>{
+  const u=new URL(request.url);
+  if(u.hostname==='fence.test')return Response.json(null);
+  assert.equal(u.hostname,'api.twenty.com');
+  assert.equal(request.headers.get('authorization'),'Bearer twenty_workerd_secret_1234567890');
+  const payload=request.method==='POST'?await request.json():null;
+  calls.push({method:request.method,path:u.pathname+u.search,payload});
+  if(u.pathname==='/rest/people'&&request.method==='GET')return Response.json({data:{people:[]}});
+  if(u.pathname==='/rest/people'&&request.method==='POST')return Response.json({data:{createPerson:{id:'person_w1'}}},{status:201});
+  if(u.pathname==='/rest/notes'&&request.method==='POST')return Response.json({data:{createNote:{id:'note_w1'}}},{status:201});
+  if(u.pathname==='/rest/noteTargets'&&request.method==='POST'){
+   if(failTargetOnce){failTargetOnce=false;return new Response('temporary',{status:503});}
+   return Response.json({data:{createNoteTarget:{id:'target_w1'}}},{status:201});
+  }
+  throw Error('Unexpected Twenty request: '+request.method+' '+u.href);
+ };
+ const start=()=>new Miniflare(convertV4MiniflareOptions({resourcePersistencePath:dir,workers:[{name:'twenty-drill',modules:true,script:source,compatibilityDate:'2026-11-10',durableObjects:{BOX:{className:'IntegrationHarness',useSQLite:true}},bindings:{TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')},outboundService}]}));
+ const call=async(mf,path,body)=>{const r=await mf.dispatchFetch('http://localhost'+path,body?{method:'POST',body:JSON.stringify(body)}:{});assert.equal(r.status,200);return r.json();};
+ let mf;
+ try{
+  mf=start();
+  const created=await call(mf,'/setup-twenty',{});assert.equal(created.integration.kind,'twenty');assert.equal(created.integration.destinationLabel,'api.twenty.com');
+  const tested=await call(mf,'/test-twenty',{id:created.integration.id});assert.equal(tested.state,'delivered');
+  await call(mf,'/seed-confirmed',{});
+  await call(mf,'/alarm',{});
+  assert.equal((await call(mf,'/status')).integrations.deliveries[0].state,'retry');
+  assert.deepEqual(calls.map(c=>`${c.method} ${c.path.split('?')[0]}`),['GET /rest/people','GET /rest/people','POST /rest/people','POST /rest/notes','POST /rest/noteTargets']);
+  await mf.dispose();mf=null;
+
+  // Restart workerd; persisted providerState skips Person and Note creation and completes only NoteTarget.
+  calls.length=0;
+  mf=start();
+  await call(mf,'/due',{});
+  await call(mf,'/alarm',{});
+  assert.deepEqual(calls,[{method:'POST',path:'/rest/noteTargets',payload:{noteId:'note_w1',targetPersonId:'person_w1'}}]);
+  assert.equal((await call(mf,'/status')).integrations.deliveries[0].state,'delivered');
  }finally{await mf?.dispose();rmSync(root,{recursive:true,force:true});}
 });

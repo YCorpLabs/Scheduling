@@ -1,19 +1,23 @@
-// Slack, Discord and webhook notifications. Destination URLs are write-only: after saving, only the
-// backend's destinationLabel is shown. A signing secret returned once is held in its dialog only.
+// Slack, Discord, Twenty CRM and webhook integrations. Destination URLs and API keys are
+// write-only: after saving, only the backend's destinationLabel is shown. A signing secret
+// returned once is held in its dialog only.
 // Brand marks: Slack and Discord from Simple Icons (CC0 1.0); the webhook glyph from Lucide (ISC).
 import {esc,createDialog,copyText,confirmAction} from './workspace-ui.js';
 import {showRowMenu} from './bookings-ui.js';
 
 export const webhookHostsReady=data=>!!(data?.status?.customWebhookHostsConfigured??data?.customWebhookHostsConfigured);
+export const twentyHostsReady=data=>!!(data?.status?.customTwentyHostsConfigured??data?.customTwentyHostsConfigured);
 export const KINDS={
   slack:{label:'Slack',url:'Slack webhook URL',placeholder:'https://hooks.slack.com/services/…',blurb:'Post to a channel',help:'https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/',helpLabel:'Create an incoming webhook in Slack'},
   discord:{label:'Discord',url:'Discord webhook URL',placeholder:'https://discord.com/api/webhooks/…',blurb:'Post to a server channel',help:'https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks',helpLabel:'Create a webhook in Discord'},
+  twenty:{label:'Twenty CRM',url:'Twenty API URL',placeholder:'https://api.twenty.com',defaultUrl:'https://api.twenty.com',blurb:'Sync contacts and booking notes',help:'https://docs.twenty.com/developers/extend/capabilities/apis',helpLabel:'Create an API key in Twenty'},
   webhook:{label:'Webhook',url:'Endpoint URL',placeholder:'https://example.com/hooks/scheduling',blurb:'Send signed events to your app'}
 };
-const ORDER=['slack','discord','webhook'];
+const ORDER=['slack','discord','twenty','webhook'];
 const LOGOS={
   slack:'<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z"/><path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z"/><path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312z"/><path fill="#ECB22E" d="M15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/></svg>',
   discord:'<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="#5865F2" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>',
+  twenty:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="4.5"/><path d="M7.3 9.9a2 2 0 0 1 3.9.5c0 1.4-1.3 2.2-3.9 4.6h4.1"/><rect x="13.6" y="8.5" width="3.4" height="6.5" rx="1.7"/></svg>',
   webhook:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/></svg>'
 };
 const CLOSE='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
@@ -62,29 +66,42 @@ const STATES={queued:'Queued',retry:'Retrying',in_flight:'Sending',delivered:'De
 export const deliveryStateLabel=state=>STATES[state]||String(state||'Unknown');
 export const canRetry=d=>d?.state==='failed';
 export const canDiscard=d=>['failed','quarantined'].includes(d?.state);
-const ERRORS={rate_limited:'Rate limited by the destination. Retrying.',provider_unavailable:'Destination unavailable. Retrying.',provider_rejected:'Rejected by the destination. Check the URL.',destination_not_public:'Destination is not a public address.',webhook_host_not_approved:'Webhook host is not approved.',delivery_unavailable:'Could not reach the destination.',queue_capacity:'Delivery queue was full.',integration_removed:'Integration was removed.',integration_changed:'Integration changed before sending.',operator_discarded:'Discarded.',restored:'Held after a restore.'};
+const ERRORS={rate_limited:'Rate limited by the destination. Retrying.',provider_unavailable:'Destination unavailable. Retrying.',provider_unauthorized:'Rejected by the destination. Check the API key.',provider_rejected:'Rejected by the destination. Check the URL.',destination_not_public:'Destination is not a public address.',webhook_host_not_approved:'Webhook host is not approved.',twenty_host_not_approved:'Self-hosted Twenty host is not approved.',delivery_unavailable:'Could not reach the destination.',queue_capacity:'Delivery queue was full.',integration_removed:'Integration was removed.',integration_changed:'Integration changed before sending.',operator_discarded:'Discarded.',restored:'Held after a restore.'};
 export function errorLabel(code){if(!code)return '';const http=/^http_(\d{3})$/.exec(code);return http?`HTTP ${http[1]}`:ERRORS[code]||code;}
 // Normalises the editor form into the configure request body.
 export function integrationPayload(values,existing){
-  const body={action:existing?'update':'create',kind:existing?.kind||values.kind,name:String(values.name||'').trim(),events:[...(values.events||[])],includeGuestDetails:!!values.includeGuestDetails,enabled:!!values.enabled};
+  const kind=existing?.kind||values.kind;
+  const body={action:existing?'update':'create',kind,name:String(values.name||'').trim(),events:[...(values.events||[])],includeGuestDetails:!!values.includeGuestDetails,enabled:!!values.enabled};
   if(existing)body.id=existing.id;
   const url=String(values.url||'').trim();if(url)body.url=url;
+  if(kind==='twenty'){const apiKey=String(values.apiKey||'').trim();if(apiKey)body.apiKey=apiKey;}
   return body;
 }
-// Mirrors validateDestination in src/integrations.js so a wrong paste is caught at the field.
-// The Worker still decides; webhook hosts are checked there against the operator's list.
+// Mirrors validateDestination in src/integrations.js and src/twenty.js so a wrong paste is caught at the field.
+// The Worker still decides; webhook and self-hosted Twenty hosts are checked there against the operator's list.
 const URL_RULES={
   slack:{host:'hooks.slack.com',path:/^\/services\/[A-Za-z0-9]{5,80}\/[A-Za-z0-9]{5,80}\/[A-Za-z0-9_-]{10,256}$/,message:'This isn’t a Slack incoming webhook URL.'},
   discord:{host:'discord.com',path:/^\/api(?:\/v10)?\/webhooks\/[0-9]{5,30}\/[A-Za-z0-9_-]{20,256}$/,message:'This isn’t a Discord webhook URL.'}
 };
-export function validateIntegration(body,{requireUrl,webhookHosts=true}){
+const publicHost=host=>host.includes('.')&&!host.endsWith('.')&&!host.includes(':')&&!/^\d+(?:\.\d+)*$/.test(host)&&!/(?:^|\.)(?:localhost|local|internal|lan|home|test|invalid|example)$/.test(host)&&/^[a-z0-9.-]+$/.test(host);
+export function validateIntegration(body,{requireUrl,requireApiKey=false,webhookHosts=true,twentyHosts=false}){
   if(!KINDS[body.kind])return {field:'kind',message:'Choose a destination type.'};
   if(body.kind==='webhook'&&body.action==='create'&&!webhookHosts)return {field:'kind',message:'Custom webhooks are not available on this service.'};
-  if(requireUrl&&!body.url)return {field:'url',message:body.kind==='webhook'?'Enter the endpoint URL.':`Paste the ${KINDS[body.kind].label} webhook URL.`};
+  if(body.kind==='twenty'){
+    if(requireApiKey&&!body.apiKey)return {field:'apiKey',message:'Paste your Twenty API key.'};
+    if(body.apiKey&&!/^[\x21-\x7e]{8,2048}$/.test(body.apiKey))return {field:'apiKey',message:'Enter a valid Twenty API key.'};
+  }
+  if(requireUrl&&!body.url)return {field:'url',message:body.kind==='webhook'?'Enter the endpoint URL.':body.kind==='twenty'?'Enter the Twenty API URL.':`Paste the ${KINDS[body.kind].label} webhook URL.`};
   if(body.url){
+    if(body.url.length>2048||/[\u0000-\u0020\u007f\\]/.test(body.url))return {field:'url',message:'Enter a full URL starting with https://'};
     let u;try{u=new URL(body.url);}catch{return {field:'url',message:'Enter a full URL starting with https://'};}
     if(u.protocol!=='https:')return {field:'url',message:'Use an https:// URL.'};
     if(u.username||u.password||u.hash||(u.port&&u.port!=='443'))return {field:'url',message:'Use a public https:// address without a port or sign-in details.'};
+    if(body.kind==='twenty'){
+      if(!publicHost(u.hostname))return {field:'url',message:'Use a public https:// address.'};
+      if(u.search||!/^\/(?:rest\/?)?$/.test(u.pathname))return {field:'url',message:'Use the Twenty API base URL, such as https://api.twenty.com.'};
+      if(u.hostname!=='api.twenty.com'&&!twentyHosts)return {field:'url',message:'Self-hosted Twenty hosts are not enabled on this service. Use https://api.twenty.com.'};
+    }
     const rule=URL_RULES[body.kind];if(rule&&(u.hostname!==rule.host||!rule.path.test(u.pathname)||u.search))return {field:'url',message:rule.message};
   }
   if(!body.name)return {field:'name',message:'Enter a name.'};
@@ -110,7 +127,7 @@ const CHEVRON='<svg width="16" height="16" viewBox="0 0 20 20" fill="none" strok
 const tile=kind=>`<span class="st-tile st-tile-mark integration-mark kind-${esc(kind)}" aria-hidden="true">${LOGOS[kind]||''}</span>`;
 function integrationRow(i,catalog,deliveries){
   const k=KINDS[i.kind],id=esc(i.id),name=esc(i.name),metaId=`integration-meta-${id}`,health=i.enabled?integrationHealth(i.id,deliveries):null;
-  const meta=health?[health.label,health.text.replace(/^(Last delivery (failed|held)|Retrying): /,'')].filter(Boolean).join(' · '):[i.enabled?'':'Off',k?.label||i.kind,i.kind==='webhook'?i.destinationLabel:'',eventSummary(i.events,catalog),i.includeGuestDetails?'Shares guest details':''].filter(Boolean).join(' · ');
+  const meta=health?[health.label,health.text.replace(/^(Last delivery (failed|held)|Retrying): /,'')].filter(Boolean).join(' · '):[i.enabled?'':'Off',k?.label||i.kind,['webhook','twenty'].includes(i.kind)?i.destinationLabel:'',eventSummary(i.events,catalog),i.includeGuestDetails?'Shares guest details':''].filter(Boolean).join(' · ');
   return `<div class="st-row integration-row${i.enabled?'':' off'}${health?' has-problem':''}">${tile(i.kind)}<button type="button" class="st-text st-text-button" data-edit-integration="${id}" aria-label="Edit ${name}" aria-describedby="${metaId}"><span class="st-name">${name}</span><span class="st-line${health?' st-line-problem':''}" id="${metaId}">${esc(meta)}</span></button><button type="button" class="st-chev-button" data-integration-menu="${id}" aria-label="More for ${name}" aria-haspopup="menu" aria-expanded="false">${CHEVRON}</button></div>`;
 }
 // With nothing connected, the same list offers what can be connected.
@@ -200,30 +217,43 @@ export function bindIntegrations(container,{api,getData,reload,status}){
 
 const dialogHeader=(kind,title,sub,closeLabel)=>`<div class="booking-detail-head integration-dialog-head">${kindMark(kind,'md')}<div class="integration-dialog-title"><h2 id="integration-dialog-title">${esc(title)}</h2>${sub?`<p>${esc(sub)}</p>`:''}</div><button type="button" class="icon-button" data-close aria-label="${esc(closeLabel)}">${CLOSE}</button></div>`;
 export function showIntegrationEditor({configure,getData,reload,status,sendTest,existing,trigger,initialKind,step:startStep}){
-  const kind=existing?.kind||(KINDS[initialKind]?initialKind:'slack'),k=KINDS[kind];
-  let created=null,step=startStep||'form',initial='',replacing=false;
+  const kind=existing?.kind||(KINDS[initialKind]?initialKind:'slack'),k=KINDS[kind],isTwenty=kind==='twenty';
+  let created=null,step=startStep||'form',initial='',replacing=false,replacingKey=false;
   const restore=()=>document.querySelector(created?`[data-edit-integration="${CSS.escape(created)}"]`:existing?`[data-edit-integration="${CSS.escape(existing.id)}"]`:`[data-add-integration][data-kind="${kind}"]`)||document.querySelector('[data-add-integration]')||document.querySelector('h1');
   const labels={form:existing?`Edit ${existing.name}`:`Connect ${k.label}`,remove:`Remove ${existing?.name}`,rotate:`Rotate signing secret for ${existing?.name}`};
   const {dialog,state,dismiss}=createDialog({label:labels[step]||labels.form,className:'booking-dialog integration-dialog',trigger,restore});
   const catalog=eventCatalog(getData()),groups=eventGroups(catalog);
-  let selectedEvents=new Set(existing?.events||DEFAULT_EVENTS.filter(e=>catalog.some(c=>c.id===e))),guestDetails=!!existing?.includeGuestDetails,eventsOpen=false;
-  const urlField=()=>`<div class="integration-url" id="integration-url-field" ${existing&&!replacing?'hidden':''}>
+  let selectedEvents=new Set(existing?.events||DEFAULT_EVENTS.filter(e=>catalog.some(c=>c.id===e))),guestDetails=existing?!!existing.includeGuestDetails:isTwenty,eventsOpen=false;
+  const urlField=()=>{
+    const urlHint=isTwenty?(twentyHostsReady(getData())?'Use https://api.twenty.com for Twenty Cloud, or your approved self-hosted URL.':'Use https://api.twenty.com for Twenty Cloud.'):'';
+    const showHelp=!isTwenty&&k.help;
+    const described=['integration-url-error',urlHint||showHelp?'integration-url-hint':''].filter(Boolean).join(' ');
+    return `<div class="integration-url" id="integration-url-field" ${existing&&!replacing?'hidden':''}>
       <label class="field-label" for="integration-url">${existing?'New URL':esc(k.url)}</label>
-      <input id="integration-url" name="url" type="url" inputmode="url" autocomplete="off" spellcheck="false" ${existing?'':'required aria-required="true"'} placeholder="${esc(k.placeholder)}" aria-describedby="integration-url-error${k.help?' integration-url-hint':''}">
+      <input id="integration-url" name="url" type="url" inputmode="url" autocomplete="off" spellcheck="false" ${existing?'':'required aria-required="true"'} value="${esc(!existing&&k.defaultUrl?k.defaultUrl:'')}" placeholder="${esc(k.placeholder)}" aria-describedby="${described}">
       <p class="field-error" id="integration-url-error"></p>
-      ${k.help?`<p class="hint" id="integration-url-hint"><a href="${esc(k.help)}" target="_blank" rel="noopener noreferrer">${esc(k.helpLabel)}</a></p>`:''}
+      ${urlHint?`<p class="hint" id="integration-url-hint">${esc(urlHint)}</p>`:showHelp?`<p class="hint" id="integration-url-hint"><a href="${esc(k.help)}" target="_blank" rel="noopener noreferrer">${esc(k.helpLabel)}</a></p>`:''}
+    </div>`;
+  };
+  const apiKeyField=()=>`<div class="integration-url" id="integration-api-key-field" ${existing&&!replacingKey?'hidden':''}>
+      <label class="field-label" for="integration-api-key">${existing?'New API key':'Twenty API key'}</label>
+      <input id="integration-api-key" name="apiKey" type="password" autocomplete="off" spellcheck="false" ${existing?'':'required aria-required="true"'} placeholder="Paste API key from Twenty" aria-describedby="integration-api-key-error integration-api-key-hint">
+      <p class="field-error" id="integration-api-key-error"></p>
+      <p class="hint" id="integration-api-key-hint">In Twenty, open Settings → Developers → API &amp; Webhooks. <a href="${esc(k.help)}" target="_blank" rel="noopener noreferrer">${esc(k.helpLabel)}</a></p>
     </div>`;
   function formMarkup(){
-    const destination=existing?`<div class="integration-field"><span class="field-label" id="integration-destination-label">Sends to</span><div class="integration-destination"><span>${esc(kind==='webhook'&&existing.destinationLabel?existing.destinationLabel:`Saved ${k.label} webhook`)}</span><button type="button" class="quiet-button" data-replace-url aria-expanded="${replacing}" aria-controls="integration-url-field">${replacing?'Keep current URL':'Replace URL'}</button></div>${urlField()}</div>`:`<div class="integration-field">${urlField()}</div>`;
+    const destination=existing?`<div class="integration-field"><span class="field-label" id="integration-destination-label">Sends to</span><div class="integration-destination"><span>${esc(['webhook','twenty'].includes(kind)&&existing.destinationLabel?existing.destinationLabel:`Saved ${k.label} webhook`)}</span><button type="button" class="quiet-button" data-replace-url aria-expanded="${replacing}" aria-controls="integration-url-field">${replacing?'Keep current URL':'Replace URL'}</button></div>${urlField()}</div>`:`<div class="integration-field">${urlField()}</div>`;
+    const apiKeySection=isTwenty?(existing?`<div class="integration-field"><span class="field-label" id="integration-api-key-label">API key</span><div class="integration-destination"><span>Saved API key</span><button type="button" class="quiet-button" data-replace-api-key aria-expanded="${replacingKey}" aria-controls="integration-api-key-field">${replacingKey?'Keep current key':'Replace API key'}</button></div>${apiKeyField()}</div>`:`<div class="integration-field">${apiKeyField()}</div>`):'';
     const chosen=[...selectedEvents];
     const events=`<details class="integration-events"${eventsOpen?' open':''}><summary><span class="integration-events-label">Send when</span><span class="integration-events-value" data-events-summary>${esc(eventSummary(chosen,catalog))}</span><span class="integration-events-change" aria-hidden="true"><span class="when-closed">Change</span><span class="when-open">Done</span></span></summary><fieldset class="integration-event-groups" aria-describedby="integration-events-error"><legend class="sr-only">Events to send</legend>${groups.map((g,gi)=>`<div class="integration-event-group" role="group" aria-labelledby="integration-event-group-${gi}"><p id="integration-event-group-${gi}">${esc(g.label)}</p>${g.events.map(e=>`<label class="inline-check"><input type="checkbox" name="events" value="${esc(e.id)}" ${selectedEvents.has(e.id)?'checked':''}>${esc(e.label)}</label>`).join('')}</div>`).join('')}</fieldset><p class="field-error" id="integration-events-error"></p></details>`;
-    const data=`<div class="integration-guest"><label class="inline-check"><input type="checkbox" name="includeGuestDetails" ${guestDetails?'checked':''}>Include guest name and email</label></div>`;
+    const data=`<div class="integration-guest"><label class="inline-check"><input type="checkbox" name="includeGuestDetails" ${guestDetails?'checked':''}>${isTwenty?'Sync guest name and email to Twenty contacts':'Include guest name and email'}</label></div>`;
     const secret=existing?.kind==='webhook'?`<div class="integration-secret-row"><span><strong>Signing secret</strong></span><button type="button" class="secondary compact-button" data-rotate>Rotate…</button></div>`:'';
-    return `${dialogHeader(kind,existing?existing.name:`Connect ${k.label}`,existing?`${k.label}${existing.enabled?'':' · Off'}`:'',existing?`Close edit ${existing.name}`:`Close connect ${k.label}`)}<form class="workspace-form integration-form" novalidate><div class="booking-detail-body">${destination}
+    const fields=isTwenty&&!existing?`${apiKeySection}${destination}`:`${destination}${apiKeySection}`;
+    return `${dialogHeader(kind,existing?existing.name:`Connect ${k.label}`,existing?`${k.label}${existing.enabled?'':' · Off'}`:'',existing?`Close edit ${existing.name}`:`Close connect ${k.label}`)}<form class="workspace-form integration-form" novalidate><div class="booking-detail-body">${fields}
       <div class="integration-field"><label class="field-label" for="integration-name">Name</label><input id="integration-name" name="name" required aria-required="true" maxlength="80" value="${esc(existing?existing.name:k.label)}" autocomplete="off" aria-describedby="integration-name-error"><p class="field-error" id="integration-name-error"></p></div>
       ${events}${data}${secret}<p class="error integration-error" role="alert" id="integration-error"></p></div><footer class="booking-detail-footer">${existing?'<button type="button" class="danger-quiet integration-remove" data-remove>Remove…</button>':''}<button type="button" class="secondary" data-cancel>Cancel</button><button type="submit" class="primary">${existing?'Save changes':'Connect'}</button></footer></form>`;
   }
-  const read=()=>{const f=dialog.querySelector('form');return {kind,name:f.elements.name.value,url:f.elements.url.value,events:[...f.querySelectorAll('[name=events]:checked')].map(i=>i.value),includeGuestDetails:f.elements.includeGuestDetails.checked,enabled:existing?existing.enabled:true};};
+  const read=()=>{const f=dialog.querySelector('form');return {kind,name:f.elements.name.value,url:f.elements.url.value,...(f.elements.apiKey?{apiKey:f.elements.apiKey.value}:{}),events:[...f.querySelectorAll('[name=events]:checked')].map(i=>i.value),includeGuestDetails:f.elements.includeGuestDetails.checked,enabled:existing?existing.enabled:true};};
   const snapshot=()=>JSON.stringify(read());
   state.isDirty=()=>step==='form'&&!!dialog.querySelector('form')&&snapshot()!==initial;
   function drawForm(focus){dialog.setAttribute('aria-label',labels.form);dialog.innerHTML=formMarkup();bindForm();if(!initial)initial=snapshot();if(focus)dialog.querySelector(focus)?.focus();}
@@ -232,29 +262,33 @@ export function showIntegrationEditor({configure,getData,reload,status,sendTest,
     dialog.querySelector('[data-close]').onclick=dismiss;dialog.querySelector('[data-cancel]').onclick=dismiss;
     const clear=target=>{const field=target?.closest?.('.integration-field,.integration-events');field?.querySelectorAll('.field-error').forEach(p=>p.textContent='');field?.querySelectorAll('[aria-invalid]').forEach(i=>i.removeAttribute('aria-invalid'));general.textContent='';};
     form.addEventListener('input',e=>clear(e.target));form.addEventListener('change',e=>clear(e.target));
-    const replace=dialog.querySelector('[data-replace-url]');if(replace)replace.onclick=()=>{const kept=read();replacing=!replacing;selectedEvents=new Set(kept.events);guestDetails=kept.includeGuestDetails;dialog.innerHTML=formMarkup();bindForm();dialog.querySelector('form').elements.name.value=kept.name;dialog.querySelector(replacing?'#integration-url':'[data-replace-url]').focus();};
+    const rerenderKeeping=(kept,focusSelector)=>{selectedEvents=new Set(kept.events);guestDetails=kept.includeGuestDetails;dialog.innerHTML=formMarkup();bindForm();const f=dialog.querySelector('form');f.elements.name.value=kept.name;if(replacing&&kept.url)f.elements.url.value=kept.url;if(replacingKey&&kept.apiKey&&f.elements.apiKey)f.elements.apiKey.value=kept.apiKey;dialog.querySelector(focusSelector)?.focus();};
+    const replace=dialog.querySelector('[data-replace-url]');if(replace)replace.onclick=()=>{const kept=read();replacing=!replacing;rerenderKeeping(kept,replacing?'#integration-url':'[data-replace-url]');};
+    const replaceKey=dialog.querySelector('[data-replace-api-key]');if(replaceKey)replaceKey.onclick=()=>{const kept=read();replacingKey=!replacingKey;rerenderKeeping(kept,replacingKey?'#integration-api-key':'[data-replace-api-key]');};
     const picker=dialog.querySelector('details.integration-events'),summary=dialog.querySelector('[data-events-summary]');
     picker.addEventListener('toggle',()=>{eventsOpen=picker.open;});
     picker.addEventListener('change',()=>{summary.textContent=eventSummary(read().events,catalog);});
     const remove=dialog.querySelector('[data-remove]');if(remove)remove.onclick=()=>{step='remove';drawConfirm('remove');};
     const rotate=dialog.querySelector('[data-rotate]');if(rotate)rotate.onclick=()=>{step='rotate';drawConfirm('rotate');};
     const show=({field,message})=>{
-      const input=field==='events'?form.querySelector('[name=events]'):form.elements[field],slot=dialog.querySelector(`#integration-${field}-error`);
+      const errorId=field==='apiKey'?'integration-api-key-error':`integration-${field}-error`;
+      const input=field==='events'?form.querySelector('[name=events]'):form.elements[field],slot=dialog.querySelector('#'+errorId);
       if(field==='events')dialog.querySelector('details.integration-events').open=true;
       if(!slot||!input||input.closest('[hidden]')){general.textContent=message;return;}
       slot.textContent=message;if(field!=='events')input.setAttribute('aria-invalid','true');input.focus();
     };
     form.onsubmit=async e=>{e.preventDefault();if(state.working)return;
       dialog.querySelectorAll('.field-error').forEach(p=>p.textContent='');form.querySelectorAll('[aria-invalid]').forEach(i=>i.removeAttribute('aria-invalid'));general.textContent='';
-      const body=integrationPayload(read(),existing),invalid=validateIntegration(body,{requireUrl:!existing||replacing,webhookHosts:webhookHostsReady(getData())});
+      const body=integrationPayload(read(),existing),invalid=validateIntegration(body,{requireUrl:!existing||replacing,requireApiKey:isTwenty&&(!existing||replacingKey),webhookHosts:webhookHostsReady(getData()),twentyHosts:twentyHostsReady(getData())});
       if(invalid)return show(invalid);
       state.working=true;const submit=form.querySelector('[type=submit]'),label=submit.textContent;submit.disabled=true;submit.textContent=existing?'Saving…':'Connecting…';
-      try{const result=await configure(body);form.elements.url.value='';state.working=false;created=existing?null:result?.integration?.id||null;await reload();
+      try{const result=await configure(body);form.elements.url.value='';if(form.elements.apiKey)form.elements.apiKey.value='';state.working=false;created=existing?null:result?.integration?.id||null;await reload();
         const secret=result?.signingSecret||result?.secret,name=result?.integration?.name||body.name;status(existing?'Changes saved':`${name} connected`);
         if(secret){step='secret';drawSecret(secret,name,false);}else if(created&&sendTest){step='connected';drawConnected(created,name);}else{state.isDirty=()=>false;dialog.close();}}
       catch(err){state.working=false;submit.disabled=false;submit.textContent=label;
         if(err.code==='integration_conflict'){await reload();const latest=getData()?.integrations?.find(i=>i.id===existing?.id);if(latest){existing.revision=latest.revision;existing.enabled=latest.enabled;}general.textContent='This integration changed elsewhere. Your edits are still here. Save again to apply them.';submit.focus();}
         else if(err.code==='webhook_host_not_approved')show({field:'url',message:err.message||'This webhook host needs operator approval.'});
+        else if(err.code==='twenty_host_not_approved')show({field:'url',message:err.message||'This self-hosted Twenty host needs operator approval.'});
         else{general.textContent=err.message||'The integration could not be saved.';submit.focus();}}};
   }
   function drawConfirm(action){
@@ -271,23 +305,23 @@ export function showIntegrationEditor({configure,getData,reload,status,sendTest,
   }
   // The moment something is connected: a clear success, then the one useful next step.
   const successHead=(title,sub,check=true)=>`<button type="button" class="icon-button integration-done-close" data-close aria-label="Close">${CLOSE}</button><div class="integration-done"><span class="integration-done-mark">${kindMark(kind,'xl')}${check?`<span class="integration-done-check">${ICONS.check}</span>`:''}</span><h2>${esc(title)}</h2>${sub?`<p>${esc(sub)}</p>`:''}</div>`;
-  // Slack and Discord: test while the person still has the channel open.
+  // Slack, Discord and Twenty CRM: test right after connecting.
   function drawConnected(id,name){
     state.isDirty=()=>false;dialog.classList.add('is-confirm','is-success');dialog.setAttribute('aria-label',`${name} is connected`);
-    dialog.innerHTML=`<div class="booking-detail-body integration-done-body">${successHead(`${name} is connected`,'')}<div class="integration-test" data-state="idle"><span class="integration-test-icon">${ICONS.send}</span><span class="integration-test-text"><strong>Test message</strong><span role="status" data-test-result></span></span><button type="button" class="secondary compact-button" data-send-test>Send test</button></div></div><footer class="booking-detail-footer"><button type="button" class="primary" data-done>Done</button></footer>`;
+    dialog.innerHTML=`<div class="booking-detail-body integration-done-body">${successHead(`${name} is connected`,'')}<div class="integration-test" data-state="idle"><span class="integration-test-icon">${ICONS.send}</span><span class="integration-test-text"><strong>${isTwenty?'Test connection':'Test message'}</strong><span role="status" data-test-result></span></span><button type="button" class="secondary compact-button" data-send-test>${isTwenty?'Test connection':'Send test'}</button></div></div><footer class="booking-detail-footer"><button type="button" class="primary" data-done>Done</button></footer>`;
     const card=dialog.querySelector('.integration-test'),glyph=card.querySelector('.integration-test-icon'),result=dialog.querySelector('[data-test-result]'),send=dialog.querySelector('[data-send-test]');
     const show=(text,tone)=>{result.textContent=text;card.dataset.state=tone;glyph.innerHTML={sending:ICONS.spinner,ok:ICONS.check,failed:ICONS.cross,retry:ICONS.clock,pending:ICONS.clock}[tone]||ICONS.send;};
     dialog.querySelector('[data-close]').onclick=()=>dialog.close();dialog.querySelector('[data-done]').onclick=()=>dialog.close();
     // Only the request itself holds the dialog open; waiting for the result never blocks Escape or Done.
     let busy=false;
-    send.onclick=async()=>{if(busy)return;busy=true;send.disabled=true;show('Sending…','sending');
+    send.onclick=async()=>{if(busy)return;busy=true;send.disabled=true;show(isTwenty?'Testing…':'Sending…','sending');
       try{
         state.working=true;let queued;try{queued=await sendTest(id);}finally{state.working=false;}
         if(!queued?.deliveryId||queued.state==='failed'&&(!queued.errorCode||queued.errorCode==='queue_capacity'))return show('Could not be queued. Try again in a moment.','failed');
         const outcome=d=>{
-          if(d?.state==='delivered'){show('Delivered. Check the channel.','ok');return true;}
-          if(d?.state==='failed'){show(`Not delivered: ${errorLabel(d.errorCode)||'the destination refused it'}`,'failed');return true;}
-          if(d?.state==='retry'){show(`Not delivered yet: ${errorLabel(d.errorCode)||'retrying'}`,'retry');return true;}
+          if(d?.state==='delivered'){show(isTwenty?'Connected to Twenty.':'Delivered. Check the channel.','ok');return true;}
+          if(d?.state==='failed'){show(`${isTwenty?'Not connected':'Not delivered'}: ${errorLabel(d.errorCode)||'the destination refused it'}`,'failed');return true;}
+          if(d?.state==='retry'){show(`${isTwenty?'Not connected yet':'Not delivered yet'}: ${errorLabel(d.errorCode)||'retrying'}`,'retry');return true;}
           return false;
         };
         await reload();if(outcome(queued))return;
@@ -297,8 +331,8 @@ export function showIntegrationEditor({configure,getData,reload,status,sendTest,
           if(outcome(getData()?.deliveries?.find(x=>x.id===queued.deliveryId)))return;
         }
         if(dialog.open)show('Still sending. The result will appear under Recent deliveries.','pending');
-      }catch(e){show(e.message||'The test message could not be sent.','failed');}
-      finally{busy=false;if(send.isConnected){send.disabled=false;send.textContent='Send again';}}};
+      }catch(e){show(e.message||(isTwenty?'The connection test could not be run.':'The test message could not be sent.'),'failed');}
+      finally{busy=false;if(send.isConnected){send.disabled=false;send.textContent=isTwenty?'Test again':'Send again';}}};
     send.focus();
   }
   function drawSecret(secret,name,rotated){
@@ -312,5 +346,5 @@ export function showIntegrationEditor({configure,getData,reload,status,sendTest,
   }
   if(step==='remove'||step==='rotate'){dialog.showModal();drawConfirm(step);return;}
   drawForm();dialog.showModal();
-  dialog.querySelector(existing?'#integration-name':'#integration-url')?.focus();
+  dialog.querySelector(existing?'#integration-name':isTwenty?'#integration-api-key':'#integration-url')?.focus();
 }

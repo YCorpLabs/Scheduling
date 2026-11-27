@@ -237,26 +237,28 @@ export const TOOLS=[
       await record(ctx,host,'update_settings',`Changed settings: ${(saved.changes||[]).map(c=>c.path).slice(0,6).join(', ')||'no visible change'}`,{type:'settings',id:'settings'});
       return {applied:true,changes:saved.changes,warnings:saved.warnings,revision:saved.revision};
     }},
-  {name:'list_integrations',title:'List integrations',annotations:READ,description:'Slack, Discord and webhook connections with their events, and recent deliveries.',
+  {name:'list_integrations',title:'List integrations',annotations:READ,description:'Slack, Discord, Twenty CRM and webhook connections with their events, and recent deliveries.',
     inputSchema:{type:'object',properties:{...ws}},
     async run(ctx,args){
       const {access,host}=await open(ctx,args,'/api/live/integrations');const zone=zoneOf(await readSettings(host,access)),s=ok(await host.integrationStatus());
       return {integrations:(s.integrations||[]).map(i=>compact({id:i.id,kind:i.kind,name:i.name,enabled:i.enabled,events:i.events,includeGuestDetails:i.includeGuestDetails,destination:i.destinationLabel})),
-        deliveries:(s.deliveries||[]).slice(0,20).map(d=>compact({id:d.id,integrationId:d.integrationId,event:d.eventType,state:d.state,attempts:d.attempts,at:isoIn(d.lastAttemptAt||d.nextAttemptAt,zone),error:d.errorCode})),webhooksAvailable:!!s.customWebhookHostsConfigured};
+        deliveries:(s.deliveries||[]).slice(0,20).map(d=>compact({id:d.id,integrationId:d.integrationId,event:d.eventType,state:d.state,attempts:d.attempts,at:isoIn(d.lastAttemptAt||d.nextAttemptAt,zone),error:d.errorCode})),webhooksAvailable:!!s.customWebhookHostsConfigured,twentyHostsAvailable:!!s.customTwentyHostsConfigured};
     }},
-  {name:'connect_integration',title:'Connect integration',annotations:OUTBOUND,description:'Send booking updates to Slack, Discord or a webhook. Webhooks return a signing secret once.',
-    inputSchema:{type:'object',required:['kind','url'],properties:{...ws,kind:{type:'string',enum:['slack','discord','webhook']},url:{type:'string',description:'Incoming webhook URL.'},name:{type:'string'},events:{type:'array',items:{type:'string',enum:EVENTS}},include_guest_details:{type:'boolean'}}},
+  {name:'connect_integration',title:'Connect integration',annotations:OUTBOUND,description:'Send booking updates to Slack, Discord, Twenty CRM or a webhook. Webhooks return a signing secret once. Twenty CRM requires api_key and defaults url to https://api.twenty.com.',
+    inputSchema:{type:'object',required:['kind'],properties:{...ws,kind:{type:'string',enum:['slack','discord','twenty','webhook']},url:{type:'string',description:'Incoming webhook URL, or Twenty API base URL (defaults to https://api.twenty.com).'},api_key:{type:'string',description:'Twenty CRM API key (required when kind is twenty).'},name:{type:'string'},events:{type:'array',items:{type:'string',enum:EVENTS}},include_guest_details:{type:'boolean'}}},
     async run(ctx,args){
-      const {host}=await open(ctx,args,'/api/live/integrations','POST');const label={slack:'Slack',discord:'Discord',webhook:'Webhook'}[args.kind];
-      const result=ok(await host.configureIntegration({action:'create',kind:args.kind,name:args.name||label,url:args.url,events:args.events||['booking.confirmed','booking.cancelled'],includeGuestDetails:!!args.include_guest_details,enabled:true}));
+      const {host}=await open(ctx,args,'/api/live/integrations','POST');const label={slack:'Slack',discord:'Discord',twenty:'Twenty CRM',webhook:'Webhook'}[args.kind];
+      if(args.kind!=='twenty'&&!args.url)fail('url is required.');
+      if(args.kind==='twenty'&&!args.api_key)fail('api_key is required for Twenty CRM.');
+      const result=ok(await host.configureIntegration(compact({action:'create',kind:args.kind,name:args.name||label,url:args.url||(args.kind==='twenty'?'https://api.twenty.com':undefined),apiKey:args.kind==='twenty'?args.api_key:undefined,events:args.events||['booking.confirmed','booking.cancelled'],includeGuestDetails:args.include_guest_details??(args.kind==='twenty'),enabled:true})));
       await record(ctx,host,'connect_integration',`Connected ${label}: ${result.integration.name}`,{type:'integration',id:result.integration.id});
       return compact({integration:{id:result.integration.id,kind:result.integration.kind,name:result.integration.name,events:result.integration.events},signingSecret:result.signingSecret});
     }},
-  {name:'update_integration',title:'Update integration',annotations:OUTBOUND_CHANGE,description:'Rename, change events, share guest details, turn on or off, or replace the URL of an integration.',
-    inputSchema:{type:'object',required:['integration_id'],properties:{...ws,integration_id:{type:'string'},name:{type:'string'},events:{type:'array',items:{type:'string',enum:EVENTS}},enabled:{type:'boolean'},include_guest_details:{type:'boolean'},url:{type:'string'}}},
+  {name:'update_integration',title:'Update integration',annotations:OUTBOUND_CHANGE,description:'Rename, change events, share guest details, turn on or off, replace the URL, or replace a Twenty CRM API key.',
+    inputSchema:{type:'object',required:['integration_id'],properties:{...ws,integration_id:{type:'string'},name:{type:'string'},events:{type:'array',items:{type:'string',enum:EVENTS}},enabled:{type:'boolean'},include_guest_details:{type:'boolean'},url:{type:'string'},api_key:{type:'string',description:'Replace the Twenty CRM API key.'}}},
     async run(ctx,args){
       const {host}=await open(ctx,args,'/api/live/integrations','POST');const current=(ok(await host.integrationStatus()).integrations||[]).find(i=>i.id===args.integration_id);if(!current)fail('No integration with that id. Use list_integrations.');
-      const result=ok(await host.configureIntegration(compact({action:'update',id:current.id,expectedRevision:current.revision,name:args.name,events:args.events,enabled:args.enabled,includeGuestDetails:args.include_guest_details,url:args.url})));
+      const result=ok(await host.configureIntegration(compact({action:'update',id:current.id,expectedRevision:current.revision,name:args.name,events:args.events,enabled:args.enabled,includeGuestDetails:args.include_guest_details,url:args.url,apiKey:args.api_key})));
       await record(ctx,host,'update_integration',`Updated integration ${result.integration.name}${args.enabled===false?' (turned off)':args.enabled===true?' (turned on)':''}`,{type:'integration',id:current.id});
       return {integration:compact({id:result.integration.id,name:result.integration.name,enabled:result.integration.enabled,events:result.integration.events})};
     }},

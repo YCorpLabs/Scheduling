@@ -312,6 +312,9 @@ Builds deploys every push. After every pull, check that `name` in
   private booking paths. The shared config already disables them.
 - Generic signed webhooks only go to hosts listed in
   `INTEGRATION_WEBHOOK_HOSTS`.
+- Twenty CRM Cloud (`api.twenty.com`) works without extra configuration.
+  Self-hosted Twenty CRM instances only connect to hosts listed in
+  `INTEGRATION_TWENTY_HOSTS`.
 
 ## Local development against Google
 
