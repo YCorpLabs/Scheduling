@@ -39,6 +39,8 @@
 
     // Optional comma-separated hosts allowed for generic signed webhooks.
     // "INTEGRATION_WEBHOOK_HOSTS": "hooks.example.com",
+    // Optional comma-separated self-hosted Twenty CRM hosts (api.twenty.com is always allowed).
+    // "INTEGRATION_TWENTY_HOSTS": "crm.example.com",
 
     // Optional identity. Unset values fall back to neutral defaults.
     // "PRODUCT_NAME": "Scheduling",           // sign-in heading, Studio, page titles

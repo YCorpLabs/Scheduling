@@ -1,5 +1,6 @@
 import {lifecycleFetch} from './host-lifecycle.js';
 import {encryptTokens,decryptTokens,randomToken} from './crypto.js';
+import {TWENTY_CLOUD_URL,allowedTwentyHosts,validateTwentyDestination,validateTwentyApiKey,deliverTwenty} from './twenty.js';
 
 export const INTEGRATION_EVENTS=Object.freeze(['booking.requested','booking.confirmed','booking.rescheduled','booking.cancelled','booking.approval_requested','booking.rejected','booking.expired']);
 const DAY=86400000,MAX_INTEGRATIONS=10,MAX_PENDING=1000,MAX_HISTORY=1000,MAX_ATTEMPTS=8,LEASE_MS=30000;
@@ -22,9 +23,11 @@ export function validateDestination(value,kind,env={}){
   if(u.hostname!=='hooks.slack.com'||!/^\/services\/[A-Za-z0-9]{5,80}\/[A-Za-z0-9]{5,80}\/[A-Za-z0-9_-]{10,256}$/.test(u.pathname)||u.search)throw Error('Choose a Slack incoming webhook URL.');
  }else if(kind==='discord'){
   if(u.hostname!=='discord.com'||!/^\/api(?:\/v10)?\/webhooks\/[0-9]{5,30}\/[A-Za-z0-9_-]{20,256}$/.test(u.pathname)||u.search)throw Error('Choose a Discord incoming webhook URL.');
+ }else if(kind==='twenty'){
+  return validateTwentyDestination(value,env);
  }else if(kind==='webhook'){
   if(!allowedHosts(env).has(u.hostname))throw Object.assign(Error('This webhook host needs operator approval.'),{code:'webhook_host_not_approved'});
- }else throw Error('Choose Webhook, Slack or Discord.');
+ }else throw Error('Choose Webhook, Slack, Discord or Twenty CRM.');
  return u;
 }
 // Reject all IP literals at the URL boundary. DNS responses only accept global
@@ -121,7 +124,7 @@ export class IntegrationOutbox{
  }
  status(){
   this.prune();const rows=this.rows('SELECT body FROM live_integration_deliveries ORDER BY updated_at DESC,id DESC LIMIT 51'),count=this.rows('SELECT COUNT(*) AS n FROM live_integration_deliveries')[0].n;
-  return {summary:this.healthSummary(),integrations:this.configurations().map(c=>this.publicConfig(c)),deliveries:rows.slice(0,50).map(r=>{const j=JSON.parse(r.body);return {id:j.id,integrationId:j.integrationId,eventId:j.eventId,eventType:j.eventType,state:j.state,attempts:j.attempts,nextAttemptAt:pendingStates.has(j.state)?j.due:null,lastAttemptAt:j.lastAttemptAt??null,errorCode:j.errorCode??null};}),deliveryCount:count,deliveriesTruncated:rows.length>50,customWebhookHostsConfigured:allowedHosts(this.ledger.env).size>0,capabilities:{kinds:['slack','discord','webhook'],events:INTEGRATION_EVENTS,customWebhooksRequireApprovedHost:true,atLeastOnce:true},limits:{integrations:MAX_INTEGRATIONS,queued:MAX_PENDING,history:MAX_HISTORY,historyDays:30},overflowCount:this.ledger.meta('integrations:overflowCount')||0};
+  return {summary:this.healthSummary(),integrations:this.configurations().map(c=>this.publicConfig(c)),deliveries:rows.slice(0,50).map(r=>{const j=JSON.parse(r.body);return {id:j.id,integrationId:j.integrationId,eventId:j.eventId,eventType:j.eventType,state:j.state,attempts:j.attempts,nextAttemptAt:pendingStates.has(j.state)?j.due:null,lastAttemptAt:j.lastAttemptAt??null,errorCode:j.errorCode??null};}),deliveryCount:count,deliveriesTruncated:rows.length>50,customWebhookHostsConfigured:allowedHosts(this.ledger.env).size>0,customTwentyHostsConfigured:allowedTwentyHosts(this.ledger.env).size>0,capabilities:{kinds:['slack','discord','twenty','webhook'],events:INTEGRATION_EVENTS,customWebhooksRequireApprovedHost:true,customTwentyRequiresApprovedHost:true,atLeastOnce:true},limits:{integrations:MAX_INTEGRATIONS,queued:MAX_PENDING,history:MAX_HISTORY,historyDays:30},overflowCount:this.ledger.meta('integrations:overflowCount')||0};
  }
  async configure(data){
   if(!data||typeof data!=='object')return refusal('Choose an integration.');
@@ -137,18 +140,20 @@ export class IntegrationOutbox{
    const id=old?.id||randomToken(18),kind=data.kind??old?.kind,name=String(data.name??old?.name??'').trim();if(!name||name.length>80||/[\u0000-\u001f\u007f]/.test(name))return refusal('Enter an integration name up to 80 characters.');
    if(old&&kind!==old.kind)return refusal('Create a new integration to change its kind.');
    const events=data.events??old?.events??['booking.confirmed','booking.cancelled'];if(!Array.isArray(events)||!events.length||events.length>INTEGRATION_EVENTS.length||events.some(e=>!INTEGRATION_EVENTS.includes(e))||new Set(events).size!==events.length)return refusal('Choose valid booking events.');
-   const enabled=data.enabled??old?.enabled??true,includeGuestDetails=data.includeGuestDetails??old?.includeGuestDetails??false;if(typeof enabled!=='boolean'||typeof includeGuestDetails!=='boolean')return refusal('Choose valid integration settings.');
+   const enabled=data.enabled??old?.enabled??true,includeGuestDetails=data.includeGuestDetails??old?.includeGuestDetails??(kind==='twenty');if(typeof enabled!=='boolean'||typeof includeGuestDetails!=='boolean')return refusal('Choose valid integration settings.');
    const previousSecrets=old?await decryptTokens(old.ciphertext,this.ledger.env.TOKEN_ENCRYPTION_KEY,this.binding(id)):null;
-   const url=old&&data.url===undefined&&enabled===false?new URL(previousSecrets.url):validateDestination(data.url??previousSecrets?.url,kind,this.ledger.env),newSecret=kind==='webhook'&&(!old||action==='rotate')?randomToken(32):null,secret=newSecret??previousSecrets?.secret??null;
-   const ciphertext=await encryptTokens({url:url.href,secret},this.ledger.env.TOKEN_ENCRYPTION_KEY,this.binding(id)),current=this.config(id);
+   const rawUrl=data.url!==undefined?data.url:previousSecrets?.url??(kind==='twenty'?TWENTY_CLOUD_URL:undefined);
+   const url=old&&data.url===undefined&&enabled===false?new URL(previousSecrets.url):validateDestination(rawUrl,kind,this.ledger.env),newSecret=kind==='webhook'&&(!old||action==='rotate')?randomToken(32):null,secret=newSecret??previousSecrets?.secret??null;
+   const apiKey=kind==='twenty'?(data.apiKey!==undefined?validateTwentyApiKey(data.apiKey):old?validateTwentyApiKey(previousSecrets?.apiKey):validateTwentyApiKey(data.apiKey)):undefined;
+   const ciphertext=await encryptTokens({url:url.href,secret,...(apiKey!==undefined?{apiKey}:{})},this.ledger.env.TOKEN_ENCRYPTION_KEY,this.binding(id)),current=this.config(id);
    if(old&&(current?.revision!==old.revision))return refusal('Integration changed. Refresh before saving.',409,'integration_conflict');
    if(action==='create'&&this.configurations().length>=MAX_INTEGRATIONS)return refusal('Integration limit reached.',409,'integration_limit');
-   const changed=!old||action==='rotate'||url.href!==previousSecrets.url||enabled!==old.enabled||includeGuestDetails!==old.includeGuestDetails||events.length!==old.events.length||events.some(e=>!old.events.includes(e));
+   const changed=!old||action==='rotate'||url.href!==previousSecrets.url||(kind==='twenty'&&apiKey!==previousSecrets?.apiKey)||enabled!==old.enabled||includeGuestDetails!==old.includeGuestDetails||events.length!==old.events.length||events.some(e=>!old.events.includes(e));
    const cooldownUntil=url.href===previousSecrets?.url?Math.max(old?.cooldownUntil||0,current?.cooldownUntil||0):0;
    const now=Date.now(),config={id,kind,name,events,enabled,includeGuestDetails,...(cooldownUntil?{cooldownUntil}:{}),ciphertext,destinationLabel:url.hostname,deliveryRevision:old?deliveryVersion(old)+(changed?1:0):1,revision:(old?.revision||0)+1,createdAt:old?.createdAt||now,updatedAt:now};
    this.ledger.ctx.storage.transactionSync(()=>{this.sql.exec('INSERT INTO live_integrations VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body',id,JSON.stringify(config));if(old&&changed)this.cancelPending(id,'integration_changed');});
    return {integration:this.publicConfig(config),...(newSecret?{signingSecret:newSecret}:{})};
-  }catch(error){return refusal(error.code==='webhook_host_not_approved'?error.message:'Integration could not be saved. Check its destination and encryption setup.',400,error.code==='webhook_host_not_approved'?error.code:'invalid_integration');}
+  }catch(error){const approvedError=['webhook_host_not_approved','twenty_host_not_approved'].includes(error.code);return refusal(approvedError?error.message:'Integration could not be saved. Check its destination and encryption setup.',400,approvedError?error.code:'invalid_integration');}
  }
  binding(id){return this.ledger.hostId()+':integration:'+id;}
  cancelPending(id,code){for(const r of this.rows("SELECT body FROM live_integration_deliveries WHERE integration_id=? AND state IN ('queued','retry','in_flight')",id)){const j=JSON.parse(r.body);Object.assign(j,{state:'cancelled',due:0,leaseToken:null,errorCode:code,updatedAt:Date.now()});this.saveDelivery(j);}}
@@ -204,17 +209,27 @@ export class IntegrationOutbox{
    const secret=await decryptTokens(c.ciphertext,this.ledger.env.TOKEN_ENCRYPTION_KEY,this.binding(c.id)),url=validateDestination(secret.url,c.kind,this.ledger.env);
    await this.resolve(url.hostname);
    const current=this.delivery(id),config=this.config(c.id);if(this.ledger.maintenanceFrozen()||current?.leaseToken!==lease||!config||deliveryVersion(config)!==deliveryVersion(c))return;
-   const body=JSON.stringify(adapterPayload(c.kind,j.event)),timestamp=String(Math.floor(Date.now()/1000)),headers={'content-type':'application/json','user-agent':webhookUserAgent(this.ledger.env),'x-scheduling-event-id':j.eventId,'x-scheduling-event':j.eventType};
-   if(c.kind==='webhook'){headers['x-scheduling-timestamp']=timestamp;headers['x-scheduling-signature']=await signature(secret.secret,timestamp,body);}
-   // Check again after crypto yields. Existing in-flight effects cannot be undone.
-   if(this.ledger.maintenanceFrozen()||this.delivery(id)?.leaseToken!==lease||deliveryVersion(this.config(c.id)||{})!==deliveryVersion(c))return;
-   if(c.kind==='discord')url.search='?wait=true';
-   const response=await this.fetch(url.href,{method:'POST',headers,body,redirect:'manual',signal:AbortSignal.timeout(8000)});await response.body?.cancel().catch(()=>{});
-   if(response.ok){outcome='delivered';errorCode=null;}else if(response.status===429||response.status>=500){errorCode=response.status===429?'rate_limited':'provider_unavailable';const value=response.headers.get('retry-after');retryAfter=/^\d+$/.test(value||'')?Number(value)*1000:Math.max(0,Date.parse(value||'')-Date.now());}else{outcome='failed';errorCode='provider_rejected';}
-  }catch(error){errorCode=error?.message==='destination_not_public'?'destination_not_public':error?.code==='webhook_host_not_approved'?'webhook_host_not_approved':'delivery_unavailable';if(['destination_not_public','webhook_host_not_approved'].includes(errorCode))outcome='failed';}
+   if(c.kind==='twenty'){
+    const apiKey=validateTwentyApiKey(secret.apiKey);
+    const leaseValid=()=>!this.ledger.maintenanceFrozen()&&this.delivery(id)?.leaseToken===lease&&deliveryVersion(this.config(c.id)||{})===deliveryVersion(c);
+    const saveState=next=>{const live=this.delivery(id);if(live?.leaseToken===lease&&live.state==='in_flight'){live.providerState=next;live.updatedAt=Date.now();this.saveDelivery(live);}};
+    const delivered=await deliverTwenty({baseUrl:url.origin,apiKey,event:j.event,state:current.providerState,saveState,fetch:this.fetch,userAgent:webhookUserAgent(this.ledger.env),leaseValid});
+    if(delivered.aborted)return;
+    outcome=delivered.outcome;errorCode=delivered.errorCode;retryAfter=delivered.retryAfter||0;
+   }else{
+    const body=JSON.stringify(adapterPayload(c.kind,j.event)),timestamp=String(Math.floor(Date.now()/1000)),headers={'content-type':'application/json','user-agent':webhookUserAgent(this.ledger.env),'x-scheduling-event-id':j.eventId,'x-scheduling-event':j.eventType};
+    if(c.kind==='webhook'){headers['x-scheduling-timestamp']=timestamp;headers['x-scheduling-signature']=await signature(secret.secret,timestamp,body);}
+    // Check again after crypto yields. Existing in-flight effects cannot be undone.
+    if(this.ledger.maintenanceFrozen()||this.delivery(id)?.leaseToken!==lease||deliveryVersion(this.config(c.id)||{})!==deliveryVersion(c))return;
+    if(c.kind==='discord')url.search='?wait=true';
+    const response=await this.fetch(url.href,{method:'POST',headers,body,redirect:'manual',signal:AbortSignal.timeout(8000)});await response.body?.cancel().catch(()=>{});
+    if(response.ok){outcome='delivered';errorCode=null;}else if(response.status===429||response.status>=500){errorCode=response.status===429?'rate_limited':'provider_unavailable';const value=response.headers.get('retry-after');retryAfter=/^\d+$/.test(value||'')?Number(value)*1000:Math.max(0,Date.parse(value||'')-Date.now());}else{outcome='failed';errorCode='provider_rejected';}
+   }
+  }catch(error){errorCode=error?.message==='destination_not_public'?'destination_not_public':['webhook_host_not_approved','twenty_host_not_approved'].includes(error?.code)?error.code:'delivery_unavailable';if(['destination_not_public','webhook_host_not_approved','twenty_host_not_approved'].includes(errorCode))outcome='failed';}
   const current=this.delivery(id);if(current?.leaseToken!==lease||current.state!=='in_flight')return;
   if(errorCode==='rate_limited'){const latest=this.config(c.id);if(latest&&deliveryVersion(latest)===deliveryVersion(c)){latest.cooldownUntil=Date.now()+Math.max(15000,Math.min(DAY,Number.isFinite(retryAfter)?retryAfter:0),15000*2**Math.min(current.attemptsThisRun||1,8));this.sql.exec('UPDATE live_integrations SET body=? WHERE id=?',JSON.stringify(latest),c.id);}}
   const attempts=current.attemptsThisRun||current.attempts;if(outcome==='retry'&&(attempts>=MAX_ATTEMPTS||Date.now()-current.createdAt>=7*DAY))outcome='failed';
+  if(outcome==='delivered')delete current.providerState;
   Object.assign(current,{state:outcome,errorCode,leaseToken:null,updatedAt:Date.now(),due:outcome==='retry'?Date.now()+Math.max(15000,Math.min(DAY,Number.isFinite(retryAfter)?retryAfter:0),Math.min(3600000,15000*2**Math.min(attempts,8))):0});this.saveDelivery(current);
  }
 }

@@ -15,7 +15,7 @@ export const BASE_CONFIG=resolve(APP,'wrangler.jsonc');
 export const DEFAULT_INSTANCE=resolve(APP,'wrangler.instance.jsonc');
 export const DEFAULT_OUTPUT=resolve(APP,'wrangler.instance.generated.json');
 export const INSTANCE_KEYS=Object.freeze(['name','account_id','workers_dev','preview_urls','routes','vars','send_email']);
-export const INSTANCE_VARS=Object.freeze(['PUBLIC_ORIGIN','LIVE_ENABLED','NOTIFICATION_PROVIDER','MAIL_FROM','INTEGRATION_WEBHOOK_HOSTS',
+export const INSTANCE_VARS=Object.freeze(['PUBLIC_ORIGIN','LIVE_ENABLED','NOTIFICATION_PROVIDER','MAIL_FROM','INTEGRATION_WEBHOOK_HOSTS','INTEGRATION_TWENTY_HOSTS',
   'PRODUCT_NAME','BRAND_NAME','DESKTOP_APP_NAME','ORGANIZATION_NAME','ORGANIZATION_URL','ORGANIZATION_MARK_PATH',
   'SUPPORT_EMAIL','PRIVACY_URL','TERMS_URL','WEBHOOK_USER_AGENT']);
 const SECRETS=new Set(['GOOGLE_CLIENT_ID','GOOGLE_CLIENT_SECRET','TOKEN_ENCRYPTION_KEY','RESEND_API_KEY']);

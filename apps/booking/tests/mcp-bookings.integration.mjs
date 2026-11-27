@@ -9,7 +9,7 @@ import {intakeRevision} from '../public/intake.js';
 
 const ORIGIN='http://localhost',REDIRECT='http://127.0.0.1:33418/callback';
 test('an agent approves, declines, reschedules and cancels bookings and connects Slack through the MCP',{timeout:90000},async()=>{
-  const events=new Map(),codes=new Map(),slack=[];let sequence=0;
+  const events=new Map(),codes=new Map(),slack=[],twenty=[];let sequence=0;
   const mf=new Miniflare(convertV4MiniflareOptions({workers:[{name:'mcp-bookings',modules:true,scriptPath:new URL('../dist/worker.js',import.meta.url).pathname,compatibilityDate:'2026-11-10',
     durableObjects:{HOSTS:{className:'BookingHost',useSQLite:true},LIVE_HOSTS:{className:'LiveBookingHost',useSQLite:true},AUTH:{className:'AuthStore',useSQLite:true}},
     bindings:{LIVE_ENABLED:'true',PUBLIC_ORIGIN:ORIGIN,GOOGLE_CLIENT_ID:'test-client',GOOGLE_CLIENT_SECRET:'test-secret',TOKEN_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64')},
@@ -19,6 +19,7 @@ test('an agent approves, declines, reschedules and cancels bookings and connects
       if(u.hostname==='openidconnect.googleapis.com')return json({sub:'ada',email:'ada@example.com',email_verified:true,name:'Ada'});
       if(u.hostname==='cloudflare-dns.com')return json({Status:0,Answer:[{type:1,data:'93.184.216.34'}]});
       if(u.hostname==='hooks.slack.com'){slack.push(await request.json());return new Response('ok');}
+      if(u.hostname==='api.twenty.com'){twenty.push({method:request.method,path:u.pathname+u.search,auth:request.headers.get('authorization')});return json({data:{people:[]}});}
       if(u.pathname.endsWith('/calendarList'))return json({items:[{id:'primary@example.com',summary:'Work',accessRole:'owner',timeZone:'Europe/Oslo'}]});
       if(u.pathname.endsWith('/freeBusy')){const q=await request.json();return json({calendars:Object.fromEntries(q.items.map(i=>[i.id,{busy:[]}]))});}
       if(u.pathname.endsWith('/events')&&request.method==='POST'){const e=await request.json(),id=e.id||'evt'+(++sequence);events.set(id,{...e,id,status:'confirmed',hangoutLink:e.conferenceData?'https://meet.google.com/abc-defg-hij':undefined,conferenceData:e.conferenceData?{...e.conferenceData,entryPoints:[{entryPointType:'video',uri:'https://meet.google.com/abc-defg-hij'}]}:undefined});return json(events.get(id));}
@@ -76,7 +77,13 @@ test('an agent approves, declines, reschedules and cancels bookings and connects
     // Integrations: connect, test (delivered in the request), list.
     const connected=await tool('connect_integration',{kind:'slack',url:'https://hooks.slack.com/services/T0123456/B0123456/abcdefghijklmnop',name:'Team'});
     assert.equal((await tool('test_integration',{integration_id:connected.integration.id})).state,'delivered');assert.equal(slack.length,1);assert.equal(slack[0].text,'Test notification');
-    assert.equal((await tool('list_integrations')).integrations[0].name,'Team');
+    const crm=await tool('connect_integration',{kind:'twenty',api_key:'twenty_mcp_secret_1234567890',name:'Twenty CRM'});
+    assert.equal(crm.integration.kind,'twenty');
+    assert.equal((await tool('test_integration',{integration_id:crm.integration.id})).state,'delivered');
+    assert.equal(twenty.length,1);assert.equal(twenty[0].path,'/rest/people?limit=1');assert.equal(twenty[0].auth,'Bearer twenty_mcp_secret_1234567890');
+    const listed=await tool('list_integrations');
+    assert.ok(listed.integrations.some(i=>i.name==='Team'));assert.ok(listed.integrations.some(i=>i.kind==='twenty'&&i.destination==='api.twenty.com'));
+    assert.ok(!JSON.stringify(listed).includes('twenty_mcp_secret'));
 
     const activity=(await tool('get_activity')).activity.map(a=>a.action);
     for(const action of ['create_link','decide_booking','reschedule_booking','cancel_booking','connect_integration','test_integration'])assert.ok(activity.includes(action),action);
